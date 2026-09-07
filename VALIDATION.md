@@ -76,3 +76,25 @@ curl --fail-with-body -i http://127.0.0.1:58000/health
 The container image and real PostgreSQL connection are validated. The complete
 Compose stack was not started. Task 3 authentication/endpoints and message lifecycle
 transition/recovery logic remain outside Task 2.
+
+## Task 3 — 2026-09-07
+
+Implemented configured bearer authentication, explicit idempotent provisioning,
+request session cleanup, and owned assistant GET/PATCH endpoints.
+
+- Full pytest run against disposable PostgreSQL 17 on port 55433: **63 passed**,
+  no skips. Includes migrations and schema drift, concurrent provisioning,
+  real HTTP persistence across app restarts, ownership isolation, partial updates,
+  validation failures, authentication failures, and session rollback.
+- `ruff check .`, `ruff format --check .`, and `mypy`: passed.
+- `alembic heads`: one unchanged head (`3f403ab7f7d7`).
+- `alembic upgrade head --sql`: generated successfully.
+- `alembic check`: no new upgrade operations detected.
+- `python -m app.db.provision`: succeeded against the disposable database.
+- `docker compose config --quiet` and `git diff --check`: passed.
+- Two existing dependency deprecation warnings remain from Starlette's httpx
+  TestClient and AnyIO BlockingPortal alias. The full Compose stack was not run;
+  PostgreSQL and the application TestClient were exercised directly.
+
+Each implementation checkpoint was tested and committed independently. No
+schema migration was needed. See docs/task-3.md and README.md for the API and setup.

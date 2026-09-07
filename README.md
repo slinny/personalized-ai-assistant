@@ -1,8 +1,8 @@
 # Personalized AI Assistant
 
-Tasks 1–2: Python 3.12+, FastAPI, Pydantic settings, SQLAlchemy/PostgreSQL,
+Tasks 1–3: Python 3.12+, FastAPI, Pydantic settings, SQLAlchemy/PostgreSQL,
 User/AssistantProfile/Conversation/Message models, Alembic migrations, pytest,
-and local Docker development.
+single-user bearer authentication, assistant GET/PATCH endpoints, and local Docker development.
 
 ## Local Python
 
@@ -21,7 +21,7 @@ curl --fail-with-body http://localhost:8000/health
 ```
 
 Expected: HTTP 200 with `{"status":"ok"}`. This is a public liveness check;
-it deliberately works without PostgreSQL. No authentication is implemented yet.
+it deliberately works without PostgreSQL. Assistant endpoints require configured bearer authentication.
 Environment variables override `.env`. Sample credentials are local development defaults.
 
 ## Docker development
@@ -100,8 +100,44 @@ In addition to migration round-trip tests, check schema drift using
 - Validate the product hypothesis with a small same-model generic versus customized
   comparison before investing in voice, clients, and additional providers.
 
-Task 2 adds domain persistence only. The next milestone is Task 3: single-user
-bearer authentication and assistant GET/PATCH endpoints.
+Task 3 adds single-user bearer authentication and assistant GET/PATCH endpoints.
+See [the API contract](docs/task-3.md) for validation and PATCH semantics.
 
 Foundation references: [FastAPI Docker](https://fastapi.tiangolo.com/deployment/docker/)
 and [Alembic tutorial](https://alembic.sqlalchemy.org/en/latest/tutorial.html).
+
+## Assistant setup and API
+
+After copying `.env.example` to `.env`, generate a token and a stable user UUID:
+
+```sh
+python -c 'import secrets, uuid; print("AUTH_TOKEN=" + secrets.token_urlsafe(32)); print("AUTH_USER_ID=" + str(uuid.uuid4()))'
+```
+
+Save the two generated lines in `.env`, then initialize persistence:
+
+```sh
+alembic upgrade head
+python -m app.db.provision
+uvicorn app.main:app --host 127.0.0.1 --port 8000
+```
+
+Provisioning is repeatable and preserves customized profiles. For Docker, Compose
+reads `.env`; run `docker compose exec api alembic upgrade head` followed by
+`docker compose exec api python -m app.db.provision`. Recreate the API container
+with `docker compose up -d --force-recreate api` after changing configuration.
+
+Set the shell variable `AUTH_TOKEN` to your generated token to try the endpoints:
+
+```sh
+curl --fail-with-body http://localhost:8000/assistant -H "Authorization: Bearer $AUTH_TOKEN"
+curl --fail-with-body -X PATCH http://localhost:8000/assistant \
+  -H "Authorization: Bearer $AUTH_TOKEN" -H 'Content-Type: application/json' \
+  -d '{"name":"Ada","warmth":0.8,"holiday_preferences":{"new_year":"Happy New Year"}}'
+```
+
+Missing/invalid credentials return 401, an unprovisioned profile returns 404,
+and invalid updates return 422. With neither auth setting configured, assistant
+routes return 503 while `/health` continues to work. Partial auth configuration
+fails startup validation. Update the token and restart to rotate credentials;
+keep the user UUID unchanged to retain access to the same profile.
