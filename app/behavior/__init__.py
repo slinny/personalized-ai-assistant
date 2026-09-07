@@ -1,0 +1,1 @@
+"""Deterministic assistant behavior compilation."""
