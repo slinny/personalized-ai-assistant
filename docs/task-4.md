@@ -35,3 +35,12 @@ relevant to a request. That builder will decide whether greeting context is need
 which enabled greeting applies, and which configured holiday wording is relevant.
 The compiler neither detects holidays nor emits greetings or time-dependent context.
 Changing these fields, preferred_model, IDs, or timestamps cannot change its output.
+
+Validation and acceptance: tests/test_behavior.py covers input validation, all trait
+boundaries, determinism, snapshot isolation, language directives, custom instruction
+round trips, metadata/context independence, and two reviewed full-output fixtures.
+The default fixture uses balanced settings and follow-user language; the customized
+fixture uses a warm, concise, casual profile with fixed Chinese and multiline custom
+instructions. Run `.venv/bin/pytest -q tests/test_behavior.py` for these 53 cases.
+The README includes a runnable local example. No database migration, endpoint, new
+dependency, provider call, or live behavior evaluation is introduced by this task.

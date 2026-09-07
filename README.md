@@ -141,3 +141,22 @@ and invalid updates return 422. With neither auth setting configured, assistant
 routes return 503 while `/health` continues to work. Partial auth configuration
 fails startup validation. Update the token and restart to rotate credentials;
 keep the user UUID unchanged to retain access to the same profile.
+
+## Behavior compiler (Task 4)
+
+Compile validated preferences locally without a database or provider connection:
+
+```sh
+.venv/bin/python - <<'PY'
+from app.behavior import BehaviorCompiler, BehaviorProfile
+
+profile = BehaviorProfile(name="Alice", warmth=0.8, verbosity=0.2)
+print(BehaviorCompiler().compile(profile))
+PY
+```
+
+For an already-loaded assistant record, use `BehaviorProfile.model_validate(record)`
+to create the compiler input. The compiler emits identity, communication, language,
+and losslessly encoded custom instructions. See [the compiler contract](docs/task-4.md)
+for mappings, precedence, and the greeting/context boundary. Conversation/provider
+integration follows in Task 5; live behavioral evaluation follows in Task 6.

@@ -98,3 +98,31 @@ request session cleanup, and owned assistant GET/PATCH endpoints.
 
 Each implementation checkpoint was tested and committed independently. No
 schema migration was needed. See docs/task-3.md and README.md for the API and setup.
+
+## Task 4 — 2026-09-07
+
+Implemented the pure BehaviorCompiler and validated BehaviorProfile snapshot,
+centralized personality mappings, explicit language/custom instruction semantics,
+and the documented greeting/context boundary. Seven checkpoints were individually
+validated before committing.
+
+- Baseline: 33 passed, 30 PostgreSQL cases skipped without TEST_DATABASE_URL.
+- New compiler suite: 53 passed, including reviewed default/customized fixtures.
+- Full regression against disposable PostgreSQL 17 on port 55434: **116 passed,
+  no skips**, including migration round trips and schema-drift checks.
+- Ruff lint and format: passed (36 files formatted).
+- mypy: passed (29 source files).
+- pip check: no broken requirements.
+- Alembic: unchanged single head 3f403ab7f7d7; offline upgrade SQL generated.
+- README compilation example: executed successfully without database/provider I/O.
+- git diff --check: passed.
+
+Two pre-existing Starlette/AnyIO deprecation warnings remain. No live LLM behavior
+is claimed: these tests verify the deterministic instructions. The complete Compose
+stack and Python 3.12 container runtime were not rerun for this Python-only change.
+
+Full regression command (while the disposable container is running):
+
+```sh
+TEST_DATABASE_URL=postgresql+psycopg://postgres:task4-local@127.0.0.1:55434/assistant_task4_test .venv/bin/pytest -q
+```
