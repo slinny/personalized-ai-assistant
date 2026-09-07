@@ -1,11 +1,9 @@
-from sqlalchemy import MetaData
-
 from alembic import context
 from app.core.config import Settings
 from app.db.session import build_engine
+from app.models import Base
 
-# Task 2 will replace this empty metadata with the actual domain model metadata.
-target_metadata = MetaData()
+target_metadata = Base.metadata
 settings = Settings()
 
 if context.is_offline_mode():
