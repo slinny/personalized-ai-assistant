@@ -26,3 +26,53 @@ Docker and PostgreSQL executables were unavailable. Container build/Compose runt
 Python 3.12 container execution, online Alembic execution, and live PostgreSQL
 connectivity were not verified. The README provides reproducible commands for each.
 No domain persistence or authentication is claimed by this milestone.
+
+# Task 2 validation
+
+Validated on 2026-09-07 against an isolated PostgreSQL 17 container, with no
+application data or existing database modified. Task 1 notes above are historical.
+
+| Check | Result |
+| --- | --- |
+| Local Python 3.13.1, full pytest with TEST_DATABASE_URL | 32 passed |
+| Built Docker image, Python 3.12.14, full pytest with TEST_DATABASE_URL | 32 passed |
+| Ruff lint and format, local and container | Passed |
+| mypy, local and container | Passed, 13 source files |
+| pip check, local and container | No broken requirements |
+| Alembic upgrade → downgrade base → upgrade | Passed against PostgreSQL |
+| Alembic check after upgrade | No new upgrade operations detected |
+| alembic heads | Single head: 3f403ab7f7d7 |
+| alembic upgrade head --sql | Passed, reviewed generated PostgreSQL SQL |
+| Live GET /health on port 58000 | HTTP 200, {"status":"ok"} |
+| git diff --check | Passed |
+
+The 32 tests include 25 PostgreSQL cases for persistence across sessions, all four
+lifecycle statuses, required status, timestamps, defaults, exact instruction and
+string-length boundaries, personality bounds (including NaN/infinity rejection),
+invalid roles/statuses, orphan references, cross-user profile references, profile
+uniqueness, message ordering/uniqueness, restricted deletes, cascading message
+deletes, and migration round trips. Two existing Starlette deprecation warnings
+remain; no warnings are suppressed.
+
+Reproduce the PostgreSQL suite using README.md's disposable database commands.
+To also validate the declared Python 3.12 container runtime while that database runs:
+
+```sh
+docker build -t assistant-task2-validation .
+docker run --rm --network container:assistant-task2-test \
+  -e TEST_DATABASE_URL=postgresql+psycopg://postgres:task2-local@127.0.0.1:5432/assistant_task2_test \
+  assistant-task2-validation sh -c \
+  'python --version && pytest -q && ruff check . && ruff format --check . && mypy && pip check'
+```
+
+Live HTTP smoke test:
+
+```sh
+.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 58000
+# Another terminal:
+curl --fail-with-body -i http://127.0.0.1:58000/health
+```
+
+The container image and real PostgreSQL connection are validated. The complete
+Compose stack was not started. Task 3 authentication/endpoints and message lifecycle
+transition/recovery logic remain outside Task 2.
