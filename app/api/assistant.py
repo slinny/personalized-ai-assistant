@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from app.api.auth import current_user_id
 from app.api.dependencies import get_session
 from app.models import AssistantProfile
-from app.schemas.assistant import AssistantResponse
+from app.schemas.assistant import AssistantPatch, AssistantResponse
 
 router = APIRouter(prefix="/assistant", tags=["assistant"])
 UserId = Annotated[UUID, Depends(current_user_id)]
@@ -25,3 +25,15 @@ def owned_profile(session: Session, user_id: UUID) -> AssistantProfile:
 @router.get("", response_model=AssistantResponse)
 def get_assistant(user_id: UserId, session: Database) -> AssistantProfile:
     return owned_profile(session, user_id)
+
+
+@router.patch("", response_model=AssistantResponse)
+def patch_assistant(
+    payload: AssistantPatch, user_id: UserId, session: Database
+) -> AssistantProfile:
+    profile = owned_profile(session, user_id)
+    for field, value in payload.model_dump(exclude_unset=True).items():
+        setattr(profile, field, value)
+    session.commit()
+    session.refresh(profile)
+    return profile

@@ -54,3 +54,55 @@ def configured_app(
     app = create_app()
     app.dependency_overrides[get_session] = lambda: session
     return app, {"Authorization": "Bearer " + "a" * 32}
+
+
+def test_patch_partial_updates(session: Session, monkeypatch: pytest.MonkeyPatch) -> None:
+    user_id = uuid4()
+    provision(session, user_id)
+    app, headers = configured_app(monkeypatch, session, user_id)
+    with TestClient(app) as client:
+        initial = client.get("/assistant", headers=headers).json()
+        assert client.patch("/assistant", headers=headers, json={}).json() == initial
+        response = client.patch(
+            "/assistant",
+            headers=headers,
+            json={
+                "name": " Ada ",
+                "warmth": 1,
+                "preferred_model": "example-model",
+                "holiday_preferences": {"new_year": "Happy New Year"},
+            },
+        )
+        assert response.status_code == 200
+        updated = response.json()
+        assert updated["name"] == "Ada" and updated["warmth"] == 1
+        assert updated["verbosity"] == initial["verbosity"]
+        assert updated["id"] == initial["id"]
+        assert (
+            client.patch(
+                "/assistant",
+                headers=headers,
+                json={
+                    "preferred_model": None,
+                    "holiday_preferences": {},
+                },
+            ).status_code
+            == 200
+        )
+        session.expire_all()
+        saved = client.get("/assistant", headers=headers).json()
+        assert saved["preferred_model"] is None and saved["holiday_preferences"] == {}
+        assert saved["name"] == "Ada"
+        assert (
+            client.patch(
+                "/assistant",
+                headers=headers,
+                json={
+                    "name": "Should not persist",
+                    "warmth": 2,
+                },
+            ).status_code
+            == 422
+        )
+        assert client.get("/assistant", headers=headers).json() == saved
+        assert client.patch("/assistant", json={"name": "Unauthorized"}).status_code == 401
