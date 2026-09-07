@@ -103,3 +103,52 @@ def test_comparison_isolates_arms_and_preserves_model() -> None:
     assert all(len(request.messages) == 3 for request in provider.requests)
     assert '"Ada"' in provider.requests[0].messages[1].content
     assert '"Assistant"' in provider.requests[1].messages[1].content
+
+
+def test_cli_offline_and_invalid_selection(tmp_path: Path) -> None:
+    import json
+
+    from app.evaluation.__main__ import main
+
+    output = tmp_path / "run"
+    assert main(["--output", str(output), "--compare"]) == 1
+    report = json.loads((output / "results.json").read_text())
+    assert len(report["results"]) == 36
+    assert report["metadata"]["mode"] == "offline-fake"
+    assert report["counts"]["error"] == 0
+    with pytest.raises(SystemExit):
+        main(["--output", str(tmp_path / "invalid"), "--case", "missing"])
+    assert not (tmp_path / "invalid").exists()
+    with pytest.raises(SystemExit):
+        main(["--output", str(output)])
+
+
+@pytest.mark.parametrize(
+    "kind,value,response,expected",
+    [
+        ("contains", "Ada", "ADA here", True),
+        ("not_contains", "Bob", "Bob here", False),
+        ("max_words", "2", "one two three", False),
+        ("max_words", "2", "one two", True),
+    ],
+)
+def test_objective_checks(kind: str, value: str, response: str, expected: bool) -> None:
+    from app.evaluation.report import check_response
+
+    assert (
+        check_response(Check.model_validate({"kind": kind, "value": value}), response) is expected
+    )
+
+
+def test_empty_response_stops_case() -> None:
+    from app.evaluation.runner import run_cases
+    from app.evaluation.schema import Turn
+    from app.providers import GenerationResult
+    from app.providers.fake import FakeProvider
+
+    case = sample_case()
+    case.turns.append(Turn(content="Next", rubric="Answer"))
+    provider = FakeProvider(GenerationResult(" "))
+    result = run_cases([case], provider, "test")[0]
+    assert len(result.turns) == len(provider.requests) == 1
+    assert result.turns[0].error == "ProviderError"

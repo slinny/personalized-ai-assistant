@@ -199,3 +199,36 @@ limits, configuration, error handling, and transaction/recovery semantics.
 All automated generation uses a fake provider or mocked SDK. Live HTTP is blocked
 in tests, so no OpenAI credentials or paid calls are needed. Run the full suite with
 `TEST_DATABASE_URL` pointing at the disposable PostgreSQL database described above.
+
+## Behavioral evaluations (Task 6)
+
+The 18 versioned cases in `evaluations/initial.json` cover identity, personality,
+language, customization, precedence, and multi-turn consistency. Run from the
+repository root; no database is required.
+
+```sh
+# Offline harness smoke: fake text, not evidence of model quality.
+.venv/bin/python -m app.evaluation --compare --output evaluation-results/smoke
+# Explicit paid provider execution using .env configuration:
+.venv/bin/python -m app.evaluation --live --model YOUR_MODEL \
+  --compare --repeats 2 --output evaluation-results/live-001
+# Narrow runs with repeatable --case or --category filters:
+.venv/bin/python -m app.evaluation --live --category language \
+  --output evaluation-results/language-001
+```
+
+Each run requires a new output directory. JSON preserves inputs, full requests,
+responses, settings, and objective results; Markdown groups comparison arms by
+case and repetition for manual review. Score rubric adherence and factual quality
+from 0 (misses) to 2 (meets), with 1 for partial adherence. All subjective scores
+start pending; no automated overall behavioral pass is claimed. The default arm
+uses an uncustomized `Assistant` profile and is reviewed against the same desired
+outcome, without failing checks for customization it did not receive.
+
+Exit codes: 0 means objective checks did not fail (human review still pending),
+1 means objective failures, 2 means generation errors or CLI usage errors. The full
+offline smoke intentionally returns 1 because placeholder responses fail identity
+checks. Reports contain evaluation text; local output is gitignored. No credentials
+are included. `contains` checks are case-insensitive substrings; word limits count
+whitespace-separated words. Language and personality are manually reviewed, not
+inferred from these simple checks. See [Task 6](docs/task-6.md) for the contract.
