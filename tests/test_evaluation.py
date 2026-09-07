@@ -89,3 +89,17 @@ def test_report_distinguishes_fail_error_and_pending(tmp_path: "Path") -> None:
     raw = (tmp_path / "results.json").read_text()
     assert "do not expose" not in raw
     assert json.loads(raw)["results"][0]["turns"][0]["request"][1]["role"] == "developer"
+
+
+def test_comparison_isolates_arms_and_preserves_model() -> None:
+    from app.evaluation.runner import run_cases
+    from app.providers import GenerationResult
+    from app.providers.fake import FakeProvider
+
+    provider = FakeProvider(GenerationResult("Ada"), GenerationResult("Assistant"))
+    results = run_cases([sample_case()], provider, "same-model", compare=True)
+    assert [result.arm for result in results] == ["customized", "default"]
+    assert all(request.model == "same-model" for request in provider.requests)
+    assert all(len(request.messages) == 3 for request in provider.requests)
+    assert '"Ada"' in provider.requests[0].messages[1].content
+    assert '"Assistant"' in provider.requests[1].messages[1].content
