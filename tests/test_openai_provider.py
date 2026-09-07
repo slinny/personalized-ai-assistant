@@ -67,3 +67,18 @@ def test_sanitized_errors(timeout: bool) -> None:
 def test_invalid_settings(values: dict[str, object]) -> None:
     with pytest.raises(ValidationError):
         Settings.model_validate(values)
+
+
+def test_client_configuration_and_cleanup(monkeypatch: pytest.MonkeyPatch) -> None:
+    from fastapi.testclient import TestClient
+
+    from app.main import create_app
+
+    factory = Mock()
+    monkeypatch.setattr("app.main.OpenAI", factory)
+    monkeypatch.setenv("OPENAI_API_KEY", "test-only-key")
+    monkeypatch.setenv("OPENAI_TIMEOUT_SECONDS", "12")
+    with TestClient(create_app()):
+        factory.assert_called_once_with(api_key="test-only-key", timeout=12, max_retries=0)
+        factory.return_value.close.assert_not_called()
+    factory.return_value.close.assert_called_once()
