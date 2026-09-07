@@ -10,3 +10,8 @@ instruction maximum. Invalid input raises a validation error, never silent trunc
 Implementation checkpoints: validated contract, personality mappings, structured
 compiler, language/custom instructions, greeting boundary, expanded tests, final
 validation/documentation. Each checkpoint is validated before its commit.
+
+Personality bands are low [0, 0.25), balanced [0.25, 0.75), and high [0.75, 1].
+All four traits use these same boundaries, with 0.5 selecting balanced behavior.
+Wording and trait order live in app/behavior/personality.py. Raw numbers are never
+emitted. These are initial product mappings; live effectiveness is evaluated in Task 6.

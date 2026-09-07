@@ -25,3 +25,20 @@ def test_instruction_limit() -> None:
     )
     with pytest.raises(ValidationError):
         BehaviorProfile(name="Alice", custom_instructions="界" * 10001)
+
+
+@pytest.mark.parametrize("trait", ["warmth", "verbosity", "humor", "formality"])
+@pytest.mark.parametrize(
+    "value,band", [(0.0, 0), (0.249999, 0), (0.25, 1), (0.5, 1), (0.749999, 1), (0.75, 2), (1.0, 2)]
+)
+def test_personality_bands(trait: str, value: float, band: int) -> None:
+    from app.behavior.personality import MAPPINGS, communication_instructions
+
+    profile = BehaviorProfile.model_validate({"name": "Alice", trait: value})
+    output = communication_instructions(profile)
+    descriptions = dict(MAPPINGS)[trait]
+    assert descriptions[band] in output
+    for index, description in enumerate(descriptions):
+        if index != band:
+            assert description not in output
+    assert len(output.splitlines()) == 4
