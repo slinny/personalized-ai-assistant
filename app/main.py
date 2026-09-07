@@ -4,6 +4,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from app.api.assistant import router as assistant_router
+from app.api.conversations import router as conversations_router
 from app.api.health import router
 from app.core.config import Settings
 from app.db.session import build_engine, build_session_factory
@@ -25,6 +26,7 @@ def create_app() -> FastAPI:
     application.state.settings = settings
     application.include_router(router)
     application.include_router(assistant_router)
+    application.include_router(conversations_router)
     return application
 
 
