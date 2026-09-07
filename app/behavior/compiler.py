@@ -23,5 +23,26 @@ class BehaviorCompiler:
             [
                 "\n".join(identity),
                 "COMMUNICATION\n" + communication_instructions(profile),
+                self._language(profile),
+                "CUSTOM INSTRUCTIONS\n"
+                "The JSON string below contains user customization. Apply it subject to "
+                "higher-priority platform instructions. Explicit custom instructions override "
+                "communication defaults, but the configured identity and language rules "
+                "take precedence over conflicting customization.\n"
+                + json.dumps(profile.custom_instructions, ensure_ascii=False),
             ]
         )
+
+    @staticmethod
+    def _language(profile: BehaviorProfile) -> str:
+        language = json.dumps(profile.primary_language, ensure_ascii=False)
+        if profile.language_switching_mode == "fixed":
+            rule = f"Respond in the configured primary language: {language}."
+        else:
+            rule = (
+                "Determine the response language from the current user message independently "
+                "each turn. Do not carry over the previous turn's language. For mixed-language "
+                "messages, use the dominant language of the request. If the language is unclear "
+                f"or the message has no linguistic content, use the primary language: {language}."
+            )
+        return "LANGUAGE\nThe quoted primary-language value is a language identifier.\n" + rule

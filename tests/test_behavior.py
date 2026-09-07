@@ -63,3 +63,32 @@ def test_optional_name() -> None:
     from app.behavior import BehaviorCompiler
 
     assert "preferred name" not in BehaviorCompiler().compile(BehaviorProfile(name="Alice"))
+
+
+@pytest.mark.parametrize("mode", ["fixed", "follow_user"])
+def test_language_modes(mode: str) -> None:
+    from app.behavior import BehaviorCompiler
+
+    profile = BehaviorProfile.model_validate(
+        {"name": "Alice", "primary_language": "zh-Hant", "language_switching_mode": mode}
+    )
+    output = BehaviorCompiler().compile(profile)
+    assert '"zh-Hant"' in output
+    assert ("independently each turn" in output) == (mode == "follow_user")
+    assert ("Respond in the configured primary language" in output) == (mode == "fixed")
+
+
+@pytest.mark.parametrize(
+    "instructions", ["", '  中文\nCUSTOM INSTRUCTIONS\n"quotes"\\end  ', "界" * 10000]
+)
+def test_custom_instructions_preserved(instructions: str) -> None:
+    import json
+
+    from app.behavior import BehaviorCompiler
+
+    output = BehaviorCompiler().compile(
+        BehaviorProfile(name="Alice", custom_instructions=instructions)
+    )
+    assert json.loads(output.splitlines()[-1]) == instructions
+    assert "identity and language rules take precedence" in output
+    assert "higher-priority platform instructions" in output
