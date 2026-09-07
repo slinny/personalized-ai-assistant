@@ -114,3 +114,68 @@ def test_context_and_storage_fields_do_not_change_behavior() -> None:
     assert compiler.compile(BehaviorProfile.model_validate(original)) == compiler.compile(
         BehaviorProfile.model_validate(with_context)
     )
+
+
+@pytest.mark.parametrize("customized", [False, True])
+def test_reviewed_output_fixtures(customized: bool) -> None:
+    from pathlib import Path
+
+    from app.behavior import BehaviorCompiler
+
+    profile = (
+        BehaviorProfile(
+            name="Alice",
+            preferred_user_name="山",
+            warmth=1.0,
+            verbosity=0.0,
+            humor=0.0,
+            formality=0.0,
+            primary_language="zh",
+            language_switching_mode="fixed",
+            custom_instructions="Use examples.\n保留术语。",
+        )
+        if customized
+        else BehaviorProfile(name="Assistant")
+    )
+    fixture = "customized" if customized else "default"
+    expected = (Path(__file__).parent / "fixtures" / "behavior" / f"{fixture}.txt").read_text()
+    assert BehaviorCompiler().compile(profile) + "\n" == expected
+
+
+def test_loaded_orm_profile_compiles_without_session() -> None:
+    from app.behavior import BehaviorCompiler
+    from app.models import AssistantProfile
+
+    # Explicit values represent a loaded row; SQL defaults run only on INSERT.
+    row = AssistantProfile(
+        name="Alice",
+        preferred_user_name=None,
+        warmth=0.5,
+        verbosity=0.5,
+        humor=0.5,
+        formality=0.5,
+        primary_language="en",
+        language_switching_mode="follow_user",
+        custom_instructions="Be precise.",
+    )
+    snapshot = BehaviorProfile.model_validate(row)
+    row.name = "Changed later"
+    assert '"Alice"' in BehaviorCompiler().compile(snapshot)
+    assert "Changed later" not in BehaviorCompiler().compile(snapshot)
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("name", "  "),
+        ("primary_language", ""),
+        ("language_switching_mode", "sticky"),
+        ("custom_instructions", None),
+        ("verbosity", "0.5"),
+        ("humor", False),
+        ("formality", float("-inf")),
+    ],
+)
+def test_invalid_compiler_input(field: str, value: object) -> None:
+    with pytest.raises(ValidationError):
+        BehaviorProfile.model_validate({"name": "Alice", field: value})
