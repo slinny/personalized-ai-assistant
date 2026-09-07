@@ -30,3 +30,34 @@ def test_conversation_api(session: Session, monkeypatch: pytest.MonkeyPatch) -> 
         app.state.settings.auth_user_id = other_id
         assert client.get(path, headers=headers).status_code == 404
         assert client.get("/conversations", headers=headers).json() == []
+
+
+def test_send_lifecycle(session: Session, monkeypatch: pytest.MonkeyPatch) -> None:
+    from app.api.dependencies import get_provider
+    from app.providers import GenerationResult, ProviderTimeout
+    from app.providers.fake import FakeProvider
+
+    user_id = uuid4()
+    provision(session, user_id)
+    monkeypatch.setenv("AUTH_TOKEN", "a" * 32)
+    monkeypatch.setenv("AUTH_USER_ID", str(user_id))
+    monkeypatch.setenv("OPENAI_MODEL", "test-model")
+    app = create_app()
+    fake = FakeProvider(GenerationResult("Hello"), ProviderTimeout("secret"))
+    app.dependency_overrides[get_session] = lambda: session
+    app.dependency_overrides[get_provider] = lambda: fake
+    headers = {"Authorization": "Bearer " + "a" * 32}
+    with TestClient(app) as client:
+        conversation_id = client.post("/conversations", headers=headers).json()["id"]
+        path = f"/conversations/{conversation_id}/messages"
+        response = client.post(path, headers=headers, json={"content": "Hi"})
+        assert response.status_code == 201
+        assert response.json()["assistant_message"]["content"] == "Hello"
+        assert response.json()["assistant_message"]["status"] == "completed"
+        failed = client.post(path, headers=headers, json={"content": "Again"})
+        assert failed.status_code == 504
+        assert "secret" not in failed.text
+        messages = client.get(path, headers=headers).json()
+        assert [m["position"] for m in messages] == [1, 2, 3, 4]
+        assert [m["status"] for m in messages] == ["completed"] * 3 + ["failed"]
+        assert [m.content for m in fake.requests[1].messages[2:]] == ["Hi", "Hello", "Again"]

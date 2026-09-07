@@ -1,13 +1,21 @@
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.api.assistant import Database, UserId, owned_profile
+from app.api.dependencies import get_provider
 from app.models import Conversation, Message
-from app.schemas.conversation import ConversationResponse, MessageResponse
+from app.providers import GenerationProvider, ProviderError, ProviderTimeout, ProviderUnavailable
+from app.schemas.conversation import (
+    ConversationResponse,
+    MessageCreate,
+    MessageResponse,
+    TurnResponse,
+)
+from app.services.conversation import ConversationError, send_message
 
 router = APIRouter(prefix="/conversations", tags=["conversations"])
 Limit = Annotated[int, Query(ge=1, le=100)]
@@ -69,3 +77,26 @@ def list_messages(
             .limit(limit)
         )
     )
+
+
+@router.post("/{conversation_id}/messages", response_model=TurnResponse, status_code=201)
+def post_message(
+    conversation_id: UUID,
+    payload: MessageCreate,
+    user_id: UserId,
+    session: Database,
+    request: Request,
+    provider: Annotated[GenerationProvider, Depends(get_provider)],
+) -> TurnResponse:
+    try:
+        return send_message(
+            session, user_id, conversation_id, payload.content, provider, request.app.state.settings
+        )
+    except ConversationError as error:
+        raise HTTPException(error.status_code, error.detail) from None
+    except ProviderTimeout:
+        raise HTTPException(504, "Generation timed out") from None
+    except ProviderUnavailable:
+        raise HTTPException(503, "Generation is not configured") from None
+    except ProviderError:
+        raise HTTPException(502, "Generation failed") from None

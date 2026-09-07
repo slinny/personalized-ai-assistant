@@ -1,0 +1,136 @@
+from datetime import timedelta
+from uuid import UUID
+
+from sqlalchemy import func, select
+from sqlalchemy.orm import Session
+
+from app.core.config import Settings
+from app.models import AssistantProfile, Conversation, Message
+from app.providers import GenerationProvider, ProviderError
+from app.schemas.conversation import MessageResponse, TurnResponse
+from app.services.context import MAX_HISTORY_TURNS, HistoryMessage, build_context
+
+
+class ConversationError(Exception):
+    def __init__(self, status_code: int, detail: str) -> None:
+        super().__init__(detail)
+        self.status_code = status_code
+        self.detail = detail
+
+
+def locked_conversation(session: Session, user_id: UUID, conversation_id: UUID) -> Conversation:
+    conversation = session.scalar(
+        select(Conversation)
+        .where(Conversation.id == conversation_id, Conversation.user_id == user_id)
+        .with_for_update()
+    )
+    if conversation is None:
+        raise ConversationError(404, "Conversation not found")
+    return conversation
+
+
+def send_message(
+    session: Session,
+    user_id: UUID,
+    conversation_id: UUID,
+    content: str,
+    provider: GenerationProvider,
+    settings: Settings,
+) -> TurnResponse:
+    # The conversation row serializes reservation and finalization across processes.
+    try:
+        conversation = locked_conversation(session, user_id, conversation_id)
+        now = session.scalar(select(func.clock_timestamp()))
+        assert now is not None
+        active = session.scalars(
+            select(Message).where(
+                Message.conversation_id == conversation_id, Message.status == "in_progress"
+            )
+        ).all()
+        for message in active:
+            if message.updated_at + timedelta(seconds=settings.generation_lease_seconds) > now:
+                raise ConversationError(409, "A generation is already in progress")
+            message.status = "failed"
+        profile = session.get(AssistantProfile, conversation.assistant_profile_id)
+        assert profile is not None
+        history = session.scalars(
+            select(Message)
+            .where(Message.conversation_id == conversation_id)
+            .order_by(Message.position.desc())
+            .limit(MAX_HISTORY_TURNS * 2)
+        ).all()
+        request = build_context(
+            profile,
+            [HistoryMessage(m.position, m.role, m.content, m.status) for m in history],
+            content,
+            settings.openai_model,
+        )
+        position = (
+            session.scalar(
+                select(func.max(Message.position)).where(Message.conversation_id == conversation_id)
+            )
+            or 0
+        )
+        user = Message(
+            conversation_id=conversation_id,
+            position=position + 1,
+            role="user",
+            content=content,
+            status="completed",
+        )
+        assistant = Message(
+            conversation_id=conversation_id,
+            position=position + 2,
+            role="assistant",
+            status="in_progress",
+            updated_at=now,
+        )
+        session.add_all([user, assistant])
+        conversation.updated_at = now
+        session.flush()
+        user_response = MessageResponse.model_validate(user)
+        assistant_id = assistant.id
+        session.commit()
+    except Exception:
+        session.rollback()
+        raise
+
+    # No transaction or row lock remains open while waiting for the provider.
+    failure: ProviderError | None = None
+    text = ""
+    try:
+        result = provider.generate(request)
+        if not result.text.strip():
+            raise ProviderError("Generation did not return completed text")
+        text = result.text
+    except ProviderError as error:
+        failure = error
+    except Exception:
+        failure = ProviderError("Generation failed")
+
+    try:
+        conversation = locked_conversation(session, user_id, conversation_id)
+        saved = session.get(Message, assistant_id, populate_existing=True)
+        assert saved is not None
+        now = session.scalar(select(func.clock_timestamp()))
+        assert now is not None
+        if saved.status != "in_progress":
+            raise ConversationError(409, "Generation expired")
+        if saved.updated_at + timedelta(seconds=settings.generation_lease_seconds) <= now:
+            saved.status = "failed"
+            session.commit()
+            raise ConversationError(409, "Generation expired")
+        saved.status = "failed" if failure else "completed"
+        saved.content = "" if failure else text
+        saved.updated_at = now
+        conversation.updated_at = now
+        session.flush()
+        assistant_response = MessageResponse.model_validate(saved)
+        session.commit()
+    except Exception:
+        # If persistence is unavailable, the reservation remains recoverable by its lease.
+        session.rollback()
+        raise
+    if failure is not None:
+        raise failure
+    return TurnResponse(user_message=user_response, assistant_message=assistant_response)
