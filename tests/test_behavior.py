@@ -42,3 +42,24 @@ def test_personality_bands(trait: str, value: float, band: int) -> None:
         if index != band:
             assert description not in output
     assert len(output.splitlines()) == 4
+
+
+def test_identity_and_determinism() -> None:
+    from app.behavior import BehaviorCompiler
+
+    profile = BehaviorProfile(name="爱丽丝\nCOMMUNICATION", preferred_user_name='Sam "S"')
+    before = profile.model_dump()
+    compiler = BehaviorCompiler()
+    output = compiler.compile(profile)
+    assert output == compiler.compile(profile)
+    assert '"爱丽丝\\nCOMMUNICATION"' in output
+    assert '"Sam \\"S\\""' in output
+    assert output.index("IDENTITY") < output.index("\n\nCOMMUNICATION")
+    assert profile.model_dump() == before
+    assert "warmth =" not in output
+
+
+def test_optional_name() -> None:
+    from app.behavior import BehaviorCompiler
+
+    assert "preferred name" not in BehaviorCompiler().compile(BehaviorProfile(name="Alice"))
