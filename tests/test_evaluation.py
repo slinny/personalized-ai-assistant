@@ -45,3 +45,20 @@ def test_runner_history_errors_and_repetition_isolation() -> None:
     assert provider.requests[1].messages[-2].content == "Ada"
     assert len(provider.requests[2].messages) == 3
     assert results[1].turns[1].response == "Still Ada"
+
+
+def test_initial_suite() -> None:
+    from pathlib import Path
+
+    from app.evaluation.schema import load_suite
+
+    suite = load_suite(Path("evaluations/initial.json"))
+    assert len(suite.cases) == 18
+    assert {case.category for case in suite.cases} == {
+        "identity",
+        "personality",
+        "language",
+        "custom",
+        "precedence",
+        "consistency",
+    }
