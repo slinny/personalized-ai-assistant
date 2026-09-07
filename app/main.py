@@ -7,6 +7,7 @@ from app.core.config import Settings
 def create_app() -> FastAPI:
     settings = Settings()
     application = FastAPI(title=settings.app_name)
+    application.state.settings = settings
     application.include_router(router)
     return application
 
