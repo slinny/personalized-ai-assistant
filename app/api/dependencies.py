@@ -2,10 +2,11 @@ from collections.abc import Generator
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import Depends, Request
+from fastapi import Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 
 from app.api.auth import current_user_id
+from app.providers import GenerationProvider
 
 
 def get_session(
@@ -14,3 +15,10 @@ def get_session(
     # Authentication runs before a session is opened. Close rolls back uncommitted work.
     with request.app.state.session_factory() as session:
         yield session
+
+
+def get_provider(request: Request) -> GenerationProvider:
+    provider: GenerationProvider | None = getattr(request.app.state, "provider", None)
+    if provider is None:
+        raise HTTPException(503, "Generation provider is not configured")
+    return provider
