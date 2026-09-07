@@ -126,3 +126,57 @@ Full regression command (while the disposable container is running):
 ```sh
 TEST_DATABASE_URL=postgresql+psycopg://postgres:task4-local@127.0.0.1:55434/assistant_task4_test .venv/bin/pytest -q
 ```
+
+## Task 5 — 2026-09-07
+
+Implemented authenticated conversation creation/listing, ordered message retrieval,
+non-streaming generation, injectable OpenAI/fake providers, bounded compiled context,
+transactional message positions, failure persistence, and lease-based recovery.
+Each of the seven planned checkpoints was validated before its commit.
+
+- Local Python 3.13.1, full suite against disposable PostgreSQL 17: **153 passed,
+  no skips**. Includes all prior tests and migrations/schema-drift checks.
+- Built Docker image, Python 3.12.14, same full suite: **153 passed, no skips**.
+- Ruff lint/format and strict mypy: passed locally and in Docker (46 source files
+  checked by mypy).
+- `pip check`: passed locally and in Docker. OpenAI SDK 2.54.0 installed and tested.
+- Alembic: unchanged single head `3f403ab7f7d7`; offline upgrade SQL generated;
+  online schema-drift and upgrade/downgrade/upgrade checks passed in the test suite.
+- `docker compose config --quiet` and `git diff --check`: passed.
+- New integration checks exercise committed reservations with no transaction during
+  generation, same-conversation exclusion, independent conversations, expired/late
+  worker recovery, failed final-commit recovery, profile updates, history filtering,
+  pagination, ownership, and application-restart persistence.
+- All provider calls use scripted fakes or mocked SDK clients. A global test fixture
+  rejects live HTTP transport. No OpenAI API key or paid generation was used.
+
+Two existing Starlette/AnyIO deprecation warnings remain. This validates transport
+mapping and pipeline behavior, not real model output quality. The full Compose
+stack was not started; the built application image and disposable PostgreSQL were
+validated directly. No schema migration was introduced.
+
+Reproduce local validation with a disposable container:
+
+```sh
+docker run --detach --rm --name assistant-task5-test \
+  -e POSTGRES_PASSWORD=task5-local -e POSTGRES_DB=assistant_task5_test \
+  -p 127.0.0.1:55435:5432 postgres:17
+docker exec assistant-task5-test pg_isready -U postgres -d assistant_task5_test
+TEST_DATABASE_URL=postgresql+psycopg://postgres:task5-local@127.0.0.1:55435/assistant_task5_test \
+  .venv/bin/pytest -q
+.venv/bin/ruff check .
+.venv/bin/ruff format --check .
+.venv/bin/mypy
+.venv/bin/pip check
+```
+
+For the declared Python 3.12 runtime:
+
+```sh
+docker build -t assistant-task5-validation .
+docker run --rm --network container:assistant-task5-test \
+  -e TEST_DATABASE_URL=postgresql+psycopg://postgres:task5-local@127.0.0.1:5432/assistant_task5_test \
+  assistant-task5-validation sh -c \
+  'python --version && pytest -q && ruff check . && ruff format --check . && mypy && pip check'
+docker stop assistant-task5-test
+```

@@ -1,8 +1,9 @@
 # Personalized AI Assistant
 
-Tasks 1–3: Python 3.12+, FastAPI, Pydantic settings, SQLAlchemy/PostgreSQL,
+Tasks 1–5: Python 3.12+, FastAPI, Pydantic settings, SQLAlchemy/PostgreSQL,
 User/AssistantProfile/Conversation/Message models, Alembic migrations, pytest,
-single-user bearer authentication, assistant GET/PATCH endpoints, and local Docker development.
+single-user bearer authentication, assistant settings, deterministic behavior compilation,
+non-streaming OpenAI conversation/message APIs, and local Docker development.
 
 ## Local Python
 
@@ -159,4 +160,42 @@ For an already-loaded assistant record, use `BehaviorProfile.model_validate(reco
 to create the compiler input. The compiler emits identity, communication, language,
 and losslessly encoded custom instructions. See [the compiler contract](docs/task-4.md)
 for mappings, precedence, and the greeting/context boundary. Conversation/provider
-integration follows in Task 5; live behavioral evaluation follows in Task 6.
+integration is implemented in Task 5; live behavioral evaluation follows in Task 6.
+
+
+## Conversations and messages (Task 5)
+
+Set `OPENAI_API_KEY` in `.env` and set `OPENAI_MODEL` to a model available to your
+OpenAI project, or configure the assistant's `preferred_model`. Restart the API.
+Conversation creation and reading work without provider configuration; sending requires
+both a provider and a model. The existing bearer token authenticates all these routes.
+
+```sh
+curl --fail-with-body -X POST http://localhost:8000/conversations \
+  -H "Authorization: Bearer $AUTH_TOKEN"
+# Copy the returned id:
+CONVERSATION_ID=replace-with-returned-uuid
+curl --fail-with-body -X POST "http://localhost:8000/conversations/$CONVERSATION_ID/messages" \
+  -H "Authorization: Bearer $AUTH_TOKEN" -H 'Content-Type: application/json' \
+  -d '{"content":"Hello! Please introduce yourself."}'
+curl --fail-with-body "http://localhost:8000/conversations/$CONVERSATION_ID/messages?after_position=0&limit=50" \
+  -H "Authorization: Bearer $AUTH_TOKEN"
+curl --fail-with-body 'http://localhost:8000/conversations?limit=50&offset=0' \
+  -H "Authorization: Bearer $AUTH_TOKEN"
+```
+
+Sending waits for the complete reply and returns HTTP 201 with `user_message` and
+`assistant_message`. Each includes its ID, position, role, content, status, and
+timestamps. Input must be nonblank and at most 20,000 characters. Profile changes
+apply to the next turn, including preferred model and compiled behavior.
+
+Concurrent sends to one conversation return 409 while a turn is active. Upstream
+failures return 502 or 504 and leave a failed assistant message in history. Interrupted
+turns can be recovered by a new send after the generation lease expires (180 seconds
+by default). A lost response should be checked against saved history before resending;
+repeated POSTs create new turns. See [the pipeline contract](docs/task-5.md) for context
+limits, configuration, error handling, and transaction/recovery semantics.
+
+All automated generation uses a fake provider or mocked SDK. Live HTTP is blocked
+in tests, so no OpenAI credentials or paid calls are needed. Run the full suite with
+`TEST_DATABASE_URL` pointing at the disposable PostgreSQL database described above.
