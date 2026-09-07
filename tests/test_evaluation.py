@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import pytest
 from pydantic import ValidationError
 
@@ -62,3 +64,28 @@ def test_initial_suite() -> None:
         "precedence",
         "consistency",
     }
+
+
+def test_report_distinguishes_fail_error_and_pending(tmp_path: "Path") -> None:
+    import json
+
+    from app.evaluation.report import write_report
+    from app.evaluation.runner import run_cases
+    from app.providers import GenerationResult, ProviderError
+    from app.providers.fake import FakeProvider
+
+    case = sample_case()
+    case.turns[0].checks = [Check(kind="contains", value="Ada")]
+    results = run_cases(
+        [case],
+        FakeProvider(
+            GenerationResult("Bob"), ProviderError("do not expose"), GenerationResult("Ada")
+        ),
+        "test",
+        repeats=3,
+    )
+    report = write_report(results, tmp_path, {"mode": "offline"})
+    assert report["counts"] == {"error": 1, "fail": 1, "pending_review": 1}
+    raw = (tmp_path / "results.json").read_text()
+    assert "do not expose" not in raw
+    assert json.loads(raw)["results"][0]["turns"][0]["request"][1]["role"] == "developer"
