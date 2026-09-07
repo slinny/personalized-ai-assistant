@@ -92,3 +92,25 @@ def test_custom_instructions_preserved(instructions: str) -> None:
     assert json.loads(output.splitlines()[-1]) == instructions
     assert "identity and language rules take precedence" in output
     assert "higher-priority platform instructions" in output
+
+
+def test_context_and_storage_fields_do_not_change_behavior() -> None:
+    from app.behavior import BehaviorCompiler
+
+    original = {"name": "Alice"}
+    with_context = {
+        **original,
+        "morning_greeting_enabled": True,
+        "evening_greeting_enabled": True,
+        "good_night_greeting_enabled": True,
+        "holiday_preferences": {"new_year": "Happy New Year"},
+        "preferred_model": "some-provider-model",
+        "id": "storage-only",
+        "user_id": "owner-only",
+        "created_at": "time-only",
+        "updated_at": "time-only",
+    }
+    compiler = BehaviorCompiler()
+    assert compiler.compile(BehaviorProfile.model_validate(original)) == compiler.compile(
+        BehaviorProfile.model_validate(with_context)
+    )

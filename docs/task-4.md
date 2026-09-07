@@ -27,3 +27,11 @@ integration must preserve platform instruction priority. Fixed mode uses the pri
 language. Follow-user mode selects language independently each turn; mixed messages
 use the dominant request language, with primary language as the ambiguous-input fallback.
 These tests verify compiled directions, not a model's actual language compliance.
+
+Greeting/context boundary: BehaviorProfile deliberately selects only static behavior
+fields from the loaded profile. Morning, evening, and good-night flags and holiday
+preferences remain on AssistantProfile for a future ContextBuilder to consume when
+relevant to a request. That builder will decide whether greeting context is needed,
+which enabled greeting applies, and which configured holiday wording is relevant.
+The compiler neither detects holidays nor emits greetings or time-dependent context.
+Changing these fields, preferred_model, IDs, or timestamps cannot change its output.
