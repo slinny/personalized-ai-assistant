@@ -32,3 +32,10 @@ Acceptance: the initial suite loads, offline execution and reports work, compari
 arms use the same model/settings, errors cannot masquerade as passes, and all
 available regression/lint/type checks pass. Live results are optional when provider
 configuration is unavailable and must never be inferred from fake responses.
+
+## Completion
+
+Implemented all eight checkpoints. The initial suite has 18 cases and the CLI is
+`python -m app.evaluation`; see README for usage and VALIDATION.md for final evidence.
+Reports pair arms by case/repetition and leave human review pending. Live behavior
+measurement remains unperformed because credentials and a model are not configured.

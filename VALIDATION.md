@@ -180,3 +180,35 @@ docker run --rm --network container:assistant-task5-test \
   'python --version && pytest -q && ruff check . && ruff format --check . && mypy && pip check'
 docker stop assistant-task5-test
 ```
+
+## Task 6 behavioral evaluation (2026-09-07)
+
+Eight checkpoints were implemented and committed independently after validation.
+Schema, runner, cases, reporting, and comparison checkpoint tests passed before
+commits; the documentation checkpoint passed a contract-content smoke check.
+
+Final evidence:
+
+- Host Python 3.13: **164 passed**, including all PostgreSQL integration tests,
+  using disposable `assistant_task6_test` on loopback port 55436. The temporary
+  container was stopped and removed after validation.
+- Ruff check, Ruff format check, strict mypy, dependency check, and diff whitespace
+  check passed.
+- Built `assistant-task6-validation` with Python 3.12.14; includes evaluation
+  fixtures so the CLI and new tests work in Docker. Container checks: **120 passed,
+  44 database tests skipped**, Ruff, format, mypy, and dependency checks passed.
+- Existing two Starlette/AnyIO deprecation warnings remain.
+- Offline CLI comparison ran all 18 cases in two arms: 36 results, 0 provider errors,
+  5 expected objective failures on placeholder text, 31 pending human review.
+  Exit code 1 is expected. Local JSON/Markdown artifacts are under the gitignored
+  `evaluation-results/task6-smoke/` directory.
+- No API key or model is configured, so no live calls were made. Personality,
+  language compliance, and personalization quality have **not** been measured.
+
+The harness has 11 focused tests covering suite validation, duplicate IDs, history,
+repetition/arm isolation, model parity, provider failures, blank output, objective
+checks, serialization, CLI filtering and output protection. Review rubrics use
+0/1/2 scoring recorded manually; reports intentionally do not declare an overall
+behavioral pass. Baseline comparison uses the same model/provider settings and
+fresh history per arm, but a live study should use repeated trials and blinded
+human review to reduce stochastic and reviewer effects.
