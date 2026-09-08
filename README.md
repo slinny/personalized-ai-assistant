@@ -1,9 +1,10 @@
 # Personalized AI Assistant
 
-Tasks 1–5: Python 3.12+, FastAPI, Pydantic settings, SQLAlchemy/PostgreSQL,
+Tasks 1–7: Python 3.12+, FastAPI, Pydantic settings, SQLAlchemy/PostgreSQL,
 User/AssistantProfile/Conversation/Message models, Alembic migrations, pytest,
 single-user bearer authentication, assistant settings, deterministic behavior compilation,
-non-streaming OpenAI conversation/message APIs, and local Docker development.
+non-streaming OpenAI conversation/message APIs, behavioral evaluations,
+model-specific context budgets, and local Docker development.
 
 ## Local Python
 
@@ -94,8 +95,8 @@ In addition to migration round-trip tests, check schema drift using
 - Define `/health` as liveness; use the separate database probe for connectivity.
 - Later, enforce ownership through related records (including conversation/profile
   consistency). Foreign keys alone do not enforce authorization.
-- Add a basic explicit context overflow guard with the first LLM pipeline, then
-  develop the complete history budgeting policy in Task 7.
+- Task 7 replaces the initial character guard with explicit model token budgets
+  and bounded, paginated history selection.
 - Later, specify transaction boundaries, retries, and recovery for interrupted
   message generation; avoid holding a database transaction during provider calls.
 - Validate the product hypothesis with a small same-model generic versus customized
@@ -167,6 +168,7 @@ integration is implemented in Task 5; live behavioral evaluation follows in Task
 
 Set `OPENAI_API_KEY` in `.env` and set `OPENAI_MODEL` to a model available to your
 OpenAI project, or configure the assistant's `preferred_model`. Restart the API.
+Also configure a matching entry in `CONTEXT_MODEL_BUDGETS` as described below.
 Conversation creation and reading work without provider configuration; sending requires
 both a provider and a model. The existing bearer token authenticates all these routes.
 
@@ -232,3 +234,44 @@ checks. Reports contain evaluation text; local output is gitignored. No credenti
 are included. `contains` checks are case-insensitive substrings; word limits count
 whitespace-separated words. Language and personality are manually reviewed, not
 inferred from these simple checks. See [Task 6](docs/task-6.md) for the contract.
+
+## Context budgets (Task 7)
+
+Existing deployments must add `CONTEXT_MODEL_BUDGETS` before sending messages or
+running live evaluations. Each selected model, including a profile's preferred
+model, needs an exact-name entry. Missing entries return HTTP 503 before reserving
+a turn. Conversation creation, history retrieval, and health checks still work.
+
+Example `.env` configuration (replace `YOUR_MODEL`; 8192 is an illustrative
+application capacity, not a claim about your model's context window):
+
+```dotenv
+OPENAI_MODEL=YOUR_MODEL
+OPENAI_MAX_OUTPUT_TOKENS=2048
+CONTEXT_MODEL_BUDGETS={"YOUR_MODEL":{"context_window_tokens":8192,"safety_margin_tokens":1024}}
+CONTEXT_HISTORY_SCAN_LIMIT=10000
+```
+
+Verify the model's supported context and output limits before setting these values.
+You can use a smaller context capacity as an application limit. A per-model
+`max_output_tokens` overrides `OPENAI_MAX_OUTPUT_TOKENS`. Restart the API after
+configuration changes. Invalid budgets fail settings validation at startup.
+
+The example leaves 5120 estimated input tokens after reserving output and safety
+margin. The offline estimator counts UTF-8 bytes of content and role names plus
+16 tokens per message and 16 per request. It is deliberately conservative and
+may retain less history than an exact tokenizer; counts are not provider usage.
+The output reserve covers visible text and reasoning tokens.
+
+Platform instructions, the latest compiled behavior, and the current message are
+always retained. If they exceed the allowance, sending returns HTTP 422 without
+saving a turn or calling the provider. Otherwise, the request includes the newest
+complete eligible turns that fit. Older messages remain available through GET.
+History is read in batches of 100 messages, up to the configured scan limit
+(2–100000, default 10000). Failed, cancelled, interrupted, and orphaned messages
+are excluded. Provider-side automatic truncation is disabled.
+
+Live evaluations use the same budget resolution. Offline smoke runs use a fixed
+synthetic 32768-token capacity with a 2048-token output reserve and 1024-token
+margin, independent of live settings. JSON reports include budget diagnostics.
+See [Task 7](docs/task-7.md) for estimation limits, logging, and validation details.

@@ -212,3 +212,67 @@ checks, serialization, CLI filtering and output protection. Review rubrics use
 behavioral pass. Baseline comparison uses the same model/provider settings and
 fresh history per arm, but a live study should use repeated trials and blinded
 human review to reduce stochastic and reviewer effects.
+
+## Task 7 context budgets (2026-09-08)
+
+Implemented and validated all ten checkpoints, with a commit after each step's
+checks. Changes include explicit model budget configuration, conservative local
+UTF-8 token estimates, mandatory-content overflow rejection, lazy paginated history,
+per-request output limits, and content-free diagnostics. No schema migration or
+new dependency was introduced.
+
+Final evidence:
+
+- Host Python 3.13.1: **222 passed, no skips**, against disposable PostgreSQL 17
+  in `assistant-task7-test`, database `assistant_task7_test`, loopback port 55437.
+- Built `assistant-task7-validation`, Python 3.12.14: **222 passed, no skips**,
+  against the same isolated PostgreSQL database after the local run completed.
+- Ruff lint/format, strict mypy (57 source files), and dependency checks passed
+  on both runtimes. `git diff --check` passed.
+- Alembic has the unchanged single head `3f403ab7f7d7`; offline upgrade SQL
+  generated successfully. Integration tests passed upgrade/downgrade/upgrade
+  and schema-drift checks. `docker compose config --quiet` passed.
+- Offline evaluation comparison: 36 results, 0 provider errors, 5 expected
+  objective failures on placeholder text, 31 pending human review. All request
+  estimates stayed within their budgets. Artifacts are gitignored under
+  `evaluation-results/task7-validation/`. CLI exit 1 is expected for this smoke.
+- The live CLI path was tested with a mocked SDK, including model budget
+  enforcement and per-model output overrides. No API credentials or paid calls
+  were used. Provider transport is mocked and live HTTP is blocked by the test
+  fixture; no real-model token usage or output quality is claimed.
+
+Review/regression coverage includes exact mandatory and whole-turn boundaries,
+multilingual text compared with brute-force valid suffixes, injected counters,
+failed/cancelled/interrupted/orphaned messages, lazy-read stopping, pair boundaries
+across pages, scan caps, retrieval beyond 40 messages, atomic rejection, model
+changes, output-limit snapshots, untouched stored history, and diagnostic privacy.
+Review tightened the history scan-limit snapshot so logs use the limit applied to
+that request. Existing ownership, concurrency, lease recovery, and persistence
+tests continue to pass.
+
+Two existing Starlette/AnyIO deprecation warnings remain on both runtimes. The
+full Compose application stack was not started; the built application image and
+real disposable database were tested directly. The test database container was
+stopped and removed after validation.
+
+Reproduction:
+
+```sh
+docker run --detach --rm --name assistant-task7-test \
+  -e POSTGRES_PASSWORD=task7-local -e POSTGRES_DB=assistant_task7_test \
+  -p 127.0.0.1:55437:5432 postgres:17
+# Wait for readiness before running the suite:
+docker exec assistant-task7-test pg_isready -U postgres -d assistant_task7_test
+TEST_DATABASE_URL=postgresql+psycopg://postgres:task7-local@127.0.0.1:55437/assistant_task7_test \
+  .venv/bin/pytest -q
+docker build -t assistant-task7-validation .
+docker run --rm --network container:assistant-task7-test \
+  -e TEST_DATABASE_URL=postgresql+psycopg://postgres:task7-local@127.0.0.1:5432/assistant_task7_test \
+  assistant-task7-validation sh -c \
+  'python --version && pytest -q && ruff check . && ruff format --check . && mypy && pip check'
+docker stop assistant-task7-test
+```
+
+Operational change: existing deployments need a matching `CONTEXT_MODEL_BUDGETS`
+entry for every selected model. See [Task 7](docs/task-7.md) and the README for the
+configuration contract and estimator limitations.

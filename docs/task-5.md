@@ -43,6 +43,11 @@ keeps a contiguous recent suffix of eligible pairs, at most 20 turns, within a
 messages remain retrievable. This is a conservative application character bound,
 not a model-specific token guarantee; full token budgeting belongs to Task 7.
 
+The paragraph above describes the original Task 5 policy. Task 7 supersedes it
+with explicit model budgets, output/margin reserves, offline token estimates,
+and bounded paginated history. See [Task 7](task-7.md) for the current policy;
+the old 40-message, 20-turn, and 100000-character limits no longer apply.
+
 ## Transactions and failure behavior
 
 1. Lock the owned conversation row. Reject an unexpired active generation with 409.

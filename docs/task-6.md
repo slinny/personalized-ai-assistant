@@ -39,3 +39,12 @@ Implemented all eight checkpoints. The initial suite has 18 cases and the CLI is
 `python -m app.evaluation`; see README for usage and VALIDATION.md for final evidence.
 Reports pair arms by case/repetition and leave human review pending. Live behavior
 measurement remains unperformed because credentials and a model are not configured.
+
+## Task 7 integration note
+
+Live runs now require an exact-name `CONTEXT_MODEL_BUDGETS` entry for the selected
+model. Both comparison arms use the resolved output allowance and context budget;
+JSON includes these values and per-turn context diagnostics. Overflow is a
+reported `ContextOverflow` error with no provider call for that turn. Offline
+runs use a synthetic 32768/2048/1024 context/output/margin budget. See
+[Task 7](task-7.md) for configuration and estimation limits.
