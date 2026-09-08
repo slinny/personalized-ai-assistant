@@ -63,9 +63,10 @@ def send_message(
         if model is None:
             raise ProviderUnavailable("No generation model is configured")
         budget = resolve_budget(model, settings)
+        history_scan_limit = settings.context_history_scan_limit
         request = build_context(
             profile,
-            iter_history(session, conversation_id, settings.context_history_scan_limit),
+            iter_history(session, conversation_id, history_scan_limit),
             content,
             model,
             budget,
@@ -106,9 +107,7 @@ def send_message(
         "Conversation context assembled",
         extra={
             "context_budget": asdict(request.context),
-            "history_scan_limit_reached": (
-                request.context.scanned_messages >= settings.context_history_scan_limit
-            ),
+            "history_scan_limit_reached": (request.context.scanned_messages >= history_scan_limit),
         },
     )
     failure: ProviderError | None = None

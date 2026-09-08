@@ -51,3 +51,19 @@ def test_invalid_model_budgets(entry: dict[str, object]) -> None:
 def test_invalid_model_names(name: str) -> None:
     with pytest.raises(ValidationError):
         Settings.model_validate({"context_model_budgets": {name: {"context_window_tokens": 8192}}})
+
+
+@pytest.mark.parametrize("limit", [0, 1, 100001])
+def test_invalid_history_scan_limits(limit: int) -> None:
+    with pytest.raises(ValidationError):
+        Settings(context_history_scan_limit=limit)
+
+
+def test_global_output_override_must_fit_every_model() -> None:
+    with pytest.raises(ValidationError):
+        Settings.model_validate(
+            {
+                "openai_max_output_tokens": 8192,
+                "context_model_budgets": {"model": {"context_window_tokens": 8192}},
+            }
+        )

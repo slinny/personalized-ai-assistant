@@ -3,6 +3,7 @@ from collections.abc import Iterator
 import pytest
 
 from app.models import AssistantProfile
+from app.providers import InputMessage
 from app.services.budget import ContextBudget, ContextOverflow
 from app.services.context import HistoryMessage, build_context
 from app.services.tokens import DEFAULT_TOKEN_COUNTER, count_tokens
@@ -139,3 +140,84 @@ def test_context_diagnostics_match_request_and_budget() -> None:
     assert diagnostics.estimated_input_tokens <= diagnostics.input_budget_tokens
     assert diagnostics.scanned_messages == 2 and diagnostics.included_turns == 1
     assert diagnostics.dropped_scanned_turns == 0 and not diagnostics.stopped_at_budget
+
+
+@pytest.mark.parametrize("allowance,expected_turns", [(6, 0), (7, 0), (8, 1), (10, 2)])
+def test_injectable_counter_exact_whole_turn_boundaries(
+    allowance: int, expected_turns: int
+) -> None:
+    class FixedCounter:
+        name = "fixed-test"
+        request_overhead_tokens = 3
+
+        def count_message(self, message: InputMessage) -> int:
+            return 1
+
+    history = [
+        HistoryMessage(i, "assistant" if i % 2 == 0 else "user", str(i), "completed")
+        for i in range(4, 0, -1)
+    ]
+    request = build_context(
+        profile(), history, "Next", "model", ContextBudget(allowance + 2, 1, 1), FixedCounter()
+    )
+    assert len(request.messages) == 3 + expected_turns * 2
+    assert request.context is not None
+    assert request.context.estimated_input_tokens == 6 + expected_turns * 2
+
+
+@pytest.mark.parametrize("status", ["failed", "in_progress", "cancelled"])
+def test_ineligible_and_orphaned_messages_do_not_enter_context(status: str) -> None:
+    history = [
+        HistoryMessage(9, "user", "orphan newest", "completed"),
+        HistoryMessage(8, "assistant", "excluded answer", status),
+        HistoryMessage(7, "user", "excluded question", "completed"),
+        HistoryMessage(6, "assistant", "nonadjacent answer", "completed"),
+        HistoryMessage(4, "user", "nonadjacent question", "completed"),
+        HistoryMessage(2, "assistant", "good answer", "completed"),
+        HistoryMessage(1, "user", "good question", "completed"),
+    ]
+    request = build_context(profile(), history, "Next", "model", BUDGET)
+    assert [m.content for m in request.messages[2:]] == ["good question", "good answer", "Next"]
+
+
+def test_mandatory_overflow_does_not_read_history() -> None:
+    def unreadable() -> Iterator[HistoryMessage]:
+        raise AssertionError("History should not be fetched for rejected input")
+        yield
+
+    with pytest.raises(ContextOverflow):
+        build_context(profile(), unreadable(), "Next", "model", ContextBudget(3, 1, 1))
+
+
+def test_multilingual_selection_matches_brute_force_suffixes() -> None:
+    from random import Random
+
+    rng = Random(7)
+    for _ in range(30):
+        pairs = [
+            (
+                InputMessage(
+                    "user", rng.choice(["hello", "你好", "🙂", "e\u0301"]) * rng.randrange(1, 40)
+                ),
+                InputMessage("assistant", "answer " * rng.randrange(1, 40)),
+            )
+            for _ in range(8)
+        ]
+        history = [
+            HistoryMessage(i + 1, message.role, message.content, "completed")
+            for i, message in enumerate(message for pair in pairs for message in pair)
+        ]
+        mandatory = build_context(profile(), [], "Next", "model", BUDGET).messages
+        allowance = count_tokens(mandatory, DEFAULT_TOKEN_COUNTER) + rng.randrange(0, 2000)
+        candidates = [
+            (*mandatory[:2], *(m for pair in pairs[len(pairs) - n :] for m in pair), mandatory[-1])
+            for n in range(len(pairs) + 1)
+        ]
+        expected = max(
+            (c for c in candidates if count_tokens(c, DEFAULT_TOKEN_COUNTER) <= allowance),
+            key=len,
+        )
+        request = build_context(
+            profile(), reversed(history), "Next", "model", ContextBudget(allowance + 2, 1, 1)
+        )
+        assert request.messages == expected

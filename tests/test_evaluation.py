@@ -170,3 +170,51 @@ def test_evaluation_preserves_output_budget_and_reports_overflow() -> None:
     result = run_cases([sample_case()], rejected, "test", budget=ContextBudget(3, 1, 1))[0]
     assert result.turns[0].error == "ContextOverflow"
     assert result.turns[0].request == [] and rejected.requests == []
+
+
+def test_live_cli_requires_model_budget_before_client_creation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from unittest.mock import Mock
+
+    from app.evaluation.__main__ import main
+
+    monkeypatch.setenv("OPENAI_API_KEY", "test-only-key")
+    monkeypatch.setenv("CONTEXT_MODEL_BUDGETS", "{}")
+    client = Mock()
+    monkeypatch.setattr("app.evaluation.__main__.OpenAI", client)
+    with pytest.raises(SystemExit) as caught:
+        main(["--live", "--model", "unknown", "--output", str(tmp_path / "run")])
+    assert caught.value.code == 2
+    client.assert_not_called()
+    assert not (tmp_path / "run").exists()
+
+
+def test_live_cli_uses_resolved_budget_with_mocked_sdk(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import json
+    from types import SimpleNamespace
+    from unittest.mock import MagicMock
+
+    from app.evaluation.__main__ import main
+
+    monkeypatch.setenv("OPENAI_API_KEY", "test-only-key")
+    monkeypatch.setenv("OPENAI_MAX_OUTPUT_TOKENS", "2048")
+    monkeypatch.setenv(
+        "CONTEXT_MODEL_BUDGETS",
+        '{"selected":{"context_window_tokens":8192,"max_output_tokens":256}}',
+    )
+    factory = MagicMock()
+    client = factory.return_value.__enter__.return_value
+    client.responses.create.return_value = SimpleNamespace(status="completed", output_text="Ada")
+    monkeypatch.setattr("app.evaluation.__main__.OpenAI", factory)
+    output = tmp_path / "run"
+    assert (
+        main(["--live", "--model", "selected", "--case", "identity", "--output", str(output)]) == 0
+    )
+    assert client.responses.create.call_args.kwargs["max_output_tokens"] == 256
+    report = json.loads((output / "results.json").read_text())
+    assert report["metadata"]["max_output_tokens"] == 256
+    assert report["results"][0]["turns"][0]["context"]["reserved_output_tokens"] == 256
+    assert "test-only-key" not in (output / "results.json").read_text()

@@ -7,7 +7,9 @@ from uuid import UUID, uuid4
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import Engine, delete, func, select
+from sqlalchemy import Engine, delete, event, func, select
+from sqlalchemy.engine import Connection
+from sqlalchemy.engine.interfaces import DBAPICursor, ExecutionContext
 from sqlalchemy.orm import Session
 
 from app.api.dependencies import get_provider
@@ -18,7 +20,8 @@ from app.models import AssistantProfile, Conversation, Message, User
 from app.providers import GenerationRequest, GenerationResult, ProviderError, ProviderTimeout
 from app.providers.fake import FakeProvider
 from app.schemas.conversation import TurnResponse
-from app.services.context import recent_pairs
+from app.services.budget import ContextBudget
+from app.services.context import build_context, recent_pairs
 from app.services.conversation import ConversationError, send_message
 from app.services.history import iter_history
 
@@ -458,3 +461,92 @@ def test_context_logs_counts_without_content(
     serialized = json.dumps(fields, default=str)
     assert "private user text" not in serialized and "private assistant text" not in serialized
     assert "Be kind" not in serialized
+
+
+def test_profile_model_change_rebudgets_history(env: Environment) -> None:
+    seed_history(env, 8)
+    with Session(env.engine) as session:
+        conversation = session.get(Conversation, env.conversation_id)
+        assert conversation is not None
+        profile = session.get(AssistantProfile, conversation.assistant_profile_id)
+        assert profile is not None
+        mandatory = build_context(profile, [], "Next", "small", ContextBudget(32768, 2048, 1024))
+        assert mandatory.context is not None
+        needed = mandatory.context.estimated_input_tokens
+    env.settings.context_model_budgets["small"] = ModelBudgetConfig(
+        context_window_tokens=needed + 256 + 1024, max_output_tokens=256
+    )
+    fake = FakeProvider(GenerationResult("Small reply"), GenerationResult("Large reply"))
+    app = create_app()
+    app.state.settings = env.settings
+    app.dependency_overrides[get_provider] = lambda: fake
+    headers = {"Authorization": "Bearer " + "a" * 32}
+    with TestClient(app) as client:
+        assert (
+            client.patch(
+                "/assistant", headers=headers, json={"preferred_model": "small"}
+            ).status_code
+            == 200
+        )
+        path = f"/conversations/{env.conversation_id}/messages"
+        assert client.post(path, headers=headers, json={"content": "Next"}).status_code == 201
+        assert len(fake.requests[0].messages) == 3 and fake.requests[0].max_output_tokens == 256
+        assert (
+            client.patch("/assistant", headers=headers, json={"preferred_model": None}).status_code
+            == 200
+        )
+        assert client.post(path, headers=headers, json={"content": "Next"}).status_code == 201
+    assert fake.requests[1].model == "test-model"
+    assert len(fake.requests[1].messages) == 13
+    assert len(env.messages()) == 12
+
+
+def test_budget_stop_avoids_fetching_older_pages(env: Environment) -> None:
+    seed_history(env, 220)
+    with Session(env.engine) as session, session.begin():
+        latest = session.scalar(
+            select(Message).where(
+                Message.conversation_id == env.conversation_id, Message.position == 220
+            )
+        )
+        assert latest is not None
+        latest.content = "x" * 32768
+    history_queries: list[str] = []
+
+    def record_query(
+        connection: Connection,
+        cursor: DBAPICursor,
+        statement: str,
+        parameters: object,
+        context: ExecutionContext,
+        executemany: bool,
+    ) -> None:
+        if "ORDER BY messages.position DESC" in statement:
+            history_queries.append(statement)
+
+    event.listen(env.engine, "before_cursor_execute", record_query)
+    try:
+        fake = FakeProvider(GenerationResult("New reply"))
+        env.send(fake)
+    finally:
+        event.remove(env.engine, "before_cursor_execute", record_query)
+    assert len(history_queries) == 1
+    assert len(fake.requests[0].messages) == 3
+
+
+def test_many_failed_turns_do_not_hide_older_completed_history(env: Environment) -> None:
+    seed_history(env, 120)
+    with Session(env.engine) as session, session.begin():
+        messages = session.scalars(
+            select(Message).where(
+                Message.conversation_id == env.conversation_id,
+                Message.role == "assistant",
+                Message.position > 2,
+            )
+        )
+        for message in messages:
+            message.status = "failed"
+            message.content = ""
+    fake = FakeProvider(GenerationResult("New reply"))
+    env.send(fake, "Next")
+    assert [m.content for m in fake.requests[0].messages[2:]] == ["message 1", "message 2", "Next"]
