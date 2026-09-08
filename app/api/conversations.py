@@ -15,6 +15,7 @@ from app.schemas.conversation import (
     MessageResponse,
     TurnResponse,
 )
+from app.services.budget import ContextOverflow
 from app.services.conversation import ConversationError, send_message
 
 router = APIRouter(prefix="/conversations", tags=["conversations"])
@@ -94,6 +95,12 @@ def post_message(
         )
     except ConversationError as error:
         raise HTTPException(error.status_code, error.detail) from None
+    except ContextOverflow:
+        raise HTTPException(
+            422,
+            "Instructions and current message exceed the context budget; "
+            "shorten the message or assistant instructions",
+        ) from None
     except ProviderTimeout:
         raise HTTPException(504, "Generation timed out") from None
     except ProviderUnavailable:

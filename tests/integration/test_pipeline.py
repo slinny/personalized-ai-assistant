@@ -11,7 +11,7 @@ from sqlalchemy import Engine, delete, func, select
 from sqlalchemy.orm import Session
 
 from app.api.dependencies import get_provider
-from app.core.config import Settings
+from app.core.config import ModelBudgetConfig, Settings
 from app.db.provision import provision
 from app.main import create_app
 from app.models import AssistantProfile, Conversation, Message, User
@@ -333,3 +333,42 @@ def test_http_missing_provider_does_not_reserve(env: Environment) -> None:
         )
         assert response.status_code == 503
     assert env.messages() == []
+
+
+@pytest.mark.parametrize("failure", ["message", "instructions", "unknown_model"])
+def test_context_rejection_is_atomic(env: Environment, failure: str) -> None:
+    env.send(FakeProvider(GenerationResult("Saved reply")))
+    before = [(m.id, m.content, m.status, m.updated_at) for m in env.messages()]
+    with Session(env.engine) as session:
+        conversation = session.get(Conversation, env.conversation_id)
+        assert conversation is not None
+        timestamp = conversation.updated_at
+        if failure == "instructions":
+            profile = session.get(AssistantProfile, conversation.assistant_profile_id)
+            assert profile is not None
+            profile.custom_instructions = "private instructions " * 200
+            session.commit()
+    env.settings.context_model_budgets = {
+        "test-model": ModelBudgetConfig(
+            context_window_tokens=4096, max_output_tokens=2048, safety_margin_tokens=1024
+        )
+    }
+    if failure == "unknown_model":
+        env.settings.openai_model = "unconfigured"
+    app = create_app()
+    app.state.settings = env.settings
+    fake = FakeProvider()
+    app.dependency_overrides[get_provider] = lambda: fake
+    with TestClient(app) as client:
+        response = client.post(
+            f"/conversations/{env.conversation_id}/messages",
+            headers={"Authorization": "Bearer " + "a" * 32},
+            json={"content": "private input " * 200 if failure == "message" else "Hi"},
+        )
+    assert response.status_code == (503 if failure == "unknown_model" else 422)
+    assert "private" not in response.text
+    assert fake.requests == []
+    assert [(m.id, m.content, m.status, m.updated_at) for m in env.messages()] == before
+    with Session(env.engine) as session:
+        conversation = session.get(Conversation, env.conversation_id)
+        assert conversation is not None and conversation.updated_at == timestamp
