@@ -15,8 +15,10 @@ def test_nonstreaming_adapter() -> None:
     client = Mock(spec=OpenAI)
     client.responses = Mock()
     client.responses.create.return_value = SimpleNamespace(status="completed", output_text=" Hi ")
-    provider = OpenAIProvider(client, max_output_tokens=256)
-    result = provider.generate(GenerationRequest("chosen-model", (InputMessage("user", "Hi"),)))
+    provider = OpenAIProvider(client)
+    result = provider.generate(
+        GenerationRequest("chosen-model", (InputMessage("user", "Hi"),), 256)
+    )
     assert result.text == " Hi "
     client.responses.create.assert_called_once_with(
         model="chosen-model",
@@ -24,7 +26,23 @@ def test_nonstreaming_adapter() -> None:
         stream=False,
         store=False,
         max_output_tokens=256,
+        truncation="disabled",
     )
+
+
+def test_adapter_uses_each_request_output_allowance() -> None:
+    client = Mock(spec=OpenAI)
+    client.responses = Mock()
+    client.responses.create.return_value = SimpleNamespace(status="completed", output_text="OK")
+    provider = OpenAIProvider(client)
+    for model, output in [("small", 256), ("large", 4096)]:
+        provider.generate(GenerationRequest(model, (InputMessage("user", "Hi"),), output))
+    assert [
+        call.kwargs["max_output_tokens"] for call in client.responses.create.call_args_list
+    ] == [
+        256,
+        4096,
+    ]
 
 
 @pytest.mark.parametrize(
@@ -35,7 +53,7 @@ def test_invalid_output(status: str, text: str) -> None:
     client.responses = Mock()
     client.responses.create.return_value = SimpleNamespace(status=status, output_text=text)
     with pytest.raises(ProviderError):
-        OpenAIProvider(client).generate(GenerationRequest("model", ()))
+        OpenAIProvider(client).generate(GenerationRequest("model", (), 2048))
 
 
 @pytest.mark.parametrize("timeout", [True, False])
@@ -49,7 +67,7 @@ def test_sanitized_errors(timeout: bool) -> None:
         else APIConnectionError(message="secret upstream diagnostic", request=request)
     )
     with pytest.raises(ProviderTimeout if timeout else ProviderError) as caught:
-        OpenAIProvider(client).generate(GenerationRequest("model", ()))
+        OpenAIProvider(client).generate(GenerationRequest("model", (), 2048))
     assert "secret" not in str(caught.value)
 
 

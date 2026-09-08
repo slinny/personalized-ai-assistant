@@ -3,7 +3,6 @@ from collections.abc import Iterator
 import pytest
 
 from app.models import AssistantProfile
-from app.providers import ProviderUnavailable
 from app.services.budget import ContextBudget, ContextOverflow
 from app.services.context import HistoryMessage, build_context
 from app.services.tokens import DEFAULT_TOKEN_COUNTER, count_tokens
@@ -52,14 +51,13 @@ def test_context_order_priority_and_failed_turns() -> None:
     assert [m.content for m in request.messages[2:]] == ["Question", "Answer", "Next"]
 
 
-def test_model_selection_and_latest_profile() -> None:
+def test_resolved_model_and_latest_profile() -> None:
     assistant = profile()
-    with pytest.raises(ProviderUnavailable):
-        build_context(assistant, [], "Hi", None, BUDGET)
     assistant.preferred_model = "preferred"
     assistant.name = "New name"
-    request = build_context(assistant, [], "Hi", "fallback", BUDGET)
-    assert request.model == "preferred"
+    request = build_context(assistant, [], "Hi", "resolved", BUDGET)
+    assert request.model == "resolved"
+    assert request.max_output_tokens == BUDGET.max_output_tokens
     assert "New name" in request.messages[1].content
 
 

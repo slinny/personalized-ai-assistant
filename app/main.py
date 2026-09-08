@@ -28,9 +28,7 @@ def create_app() -> FastAPI:
             if settings.openai_api_key is not None
             else None
         )
-        application.state.provider = (
-            OpenAIProvider(client, settings.openai_max_output_tokens) if client else None
-        )
+        application.state.provider = OpenAIProvider(client) if client else None
         try:
             yield
         finally:

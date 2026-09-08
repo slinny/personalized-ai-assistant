@@ -156,3 +156,17 @@ def test_empty_response_stops_case() -> None:
     result = run_cases([case], provider, "test", budget=BUDGET)[0]
     assert len(result.turns) == len(provider.requests) == 1
     assert result.turns[0].error == "ProviderError"
+
+
+def test_evaluation_preserves_output_budget_and_reports_overflow() -> None:
+    from app.evaluation.runner import run_cases
+    from app.providers import GenerationResult
+    from app.providers.fake import FakeProvider
+
+    fake = FakeProvider(GenerationResult("Ada"))
+    result = run_cases([sample_case()], fake, "test", budget=ContextBudget(8192, 256, 1024))[0]
+    assert result.turns[0].max_output_tokens == fake.requests[0].max_output_tokens == 256
+    rejected = FakeProvider()
+    result = run_cases([sample_case()], rejected, "test", budget=ContextBudget(3, 1, 1))[0]
+    assert result.turns[0].error == "ContextOverflow"
+    assert result.turns[0].request == [] and rejected.requests == []

@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import Settings
 from app.models import AssistantProfile, Conversation, Message
-from app.providers import GenerationProvider, ProviderError
+from app.providers import GenerationProvider, ProviderError, ProviderUnavailable
 from app.schemas.conversation import MessageResponse, TurnResponse
 from app.services.budget import resolve_budget
 from app.services.context import build_context
@@ -55,12 +55,16 @@ def send_message(
             message.status = "failed"
         profile = session.get(AssistantProfile, conversation.assistant_profile_id)
         assert profile is not None
+        model = profile.preferred_model or settings.openai_model
+        if model is None:
+            raise ProviderUnavailable("No generation model is configured")
+        budget = resolve_budget(model, settings)
         request = build_context(
             profile,
             iter_history(session, conversation_id, settings.context_history_scan_limit),
             content,
-            settings.openai_model,
-            resolve_budget(profile.preferred_model or settings.openai_model, settings),
+            model,
+            budget,
         )
         position = (
             session.scalar(

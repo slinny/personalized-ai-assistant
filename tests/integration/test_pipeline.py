@@ -418,3 +418,23 @@ def test_pairs_across_odd_batch_boundaries(env: Environment) -> None:
         ("message 3", "message 4"),
         ("message 1", "message 2"),
     ]
+
+
+def test_model_output_budget_is_snapshotted_before_provider_call(env: Environment) -> None:
+    env.settings.context_model_budgets["test-model"] = ModelBudgetConfig(
+        context_window_tokens=8192, max_output_tokens=256
+    )
+
+    class SettingsChangingProvider(FakeProvider):
+        def generate(self, request: GenerationRequest) -> GenerationResult:
+            env.settings.openai_max_output_tokens = 4096
+            env.settings.context_model_budgets["test-model"] = ModelBudgetConfig(
+                context_window_tokens=16384, max_output_tokens=512
+            )
+            assert request.max_output_tokens == 256
+            return super().generate(request)
+
+    env.send(SettingsChangingProvider(GenerationResult("First")))
+    fake = FakeProvider(GenerationResult("Second"))
+    env.send(fake)
+    assert fake.requests[0].max_output_tokens == 512

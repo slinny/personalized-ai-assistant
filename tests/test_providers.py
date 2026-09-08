@@ -5,7 +5,7 @@ from app.providers.fake import FakeProvider
 
 
 def test_fake_records_requests_and_scripted_outcomes() -> None:
-    request = GenerationRequest("test-model", (InputMessage("user", "hello"),))
+    request = GenerationRequest("test-model", (InputMessage("user", "hello"),), 2048)
     fake = FakeProvider(GenerationResult("hello back"), ProviderTimeout())
     assert fake.generate(request).text == "hello back"
     with pytest.raises(ProviderTimeout):

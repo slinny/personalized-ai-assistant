@@ -5,9 +5,8 @@ from app.providers import GenerationRequest, GenerationResult, ProviderError, Pr
 
 
 class OpenAIProvider:
-    def __init__(self, client: OpenAI, max_output_tokens: int = 2048) -> None:
+    def __init__(self, client: OpenAI) -> None:
         self.client = client
-        self.max_output_tokens = max_output_tokens
 
     def generate(self, request: GenerationRequest) -> GenerationResult:
         messages: ResponseInputParam = [
@@ -19,7 +18,8 @@ class OpenAIProvider:
                 input=messages,
                 stream=False,
                 store=False,
-                max_output_tokens=self.max_output_tokens,
+                max_output_tokens=request.max_output_tokens,
+                truncation="disabled",
             )
         except APITimeoutError:
             raise ProviderTimeout("Generation timed out") from None

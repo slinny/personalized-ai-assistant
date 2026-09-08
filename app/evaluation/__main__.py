@@ -1,5 +1,6 @@
 import argparse
 import hashlib
+from dataclasses import asdict
 from pathlib import Path
 
 from openai import OpenAI
@@ -55,13 +56,14 @@ def main(argv: list[str] | None = None) -> int:
         "suite_sha256": hashlib.sha256(args.suite.read_bytes()).hexdigest(),
         "repeats": args.repeats,
         "compare": args.compare,
+        "context_budget": asdict(budget),
     }
     if settings:
         if settings.openai_api_key is None:
             parser.error("Live execution requires OPENAI_API_KEY")
         metadata.update(
             timeout_seconds=settings.openai_timeout_seconds,
-            max_output_tokens=settings.openai_max_output_tokens,
+            max_output_tokens=budget.max_output_tokens,
             retries=0,
         )
         with OpenAI(
@@ -71,7 +73,7 @@ def main(argv: list[str] | None = None) -> int:
         ) as client:
             results = run_cases(
                 cases,
-                OpenAIProvider(client, settings.openai_max_output_tokens),
+                OpenAIProvider(client),
                 model,
                 args.repeats,
                 args.compare,

@@ -13,6 +13,7 @@ from app.services.context import HistoryMessage, build_context
 
 class TurnResult(BaseModel):
     request: list[dict[str, str]]
+    max_output_tokens: int | None = None
     response: str | None = None
     error: str | None = None
 
@@ -66,6 +67,7 @@ def run_cases(
                     try:
                         request = build_context(row, reversed(history), turn.content, model, budget)
                         output.request = [asdict(message) for message in request.messages]
+                        output.max_output_tokens = request.max_output_tokens
                         response = provider.generate(request).text
                         if not response.strip():
                             raise ProviderError("Empty response")

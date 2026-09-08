@@ -4,7 +4,7 @@ from itertools import pairwise
 
 from app.behavior import BehaviorCompiler, BehaviorProfile
 from app.models import AssistantProfile
-from app.providers import GenerationRequest, InputMessage, ProviderUnavailable
+from app.providers import GenerationRequest, InputMessage
 from app.services.budget import ContextBudget, ContextOverflow
 from app.services.tokens import DEFAULT_TOKEN_COUNTER, TokenCounter, count_tokens
 
@@ -42,14 +42,11 @@ def build_context(
     profile: AssistantProfile,
     history: Iterable[HistoryMessage],
     content: str,
-    default_model: str | None,
+    model: str,
     budget: ContextBudget,
     counter: TokenCounter = DEFAULT_TOKEN_COUNTER,
 ) -> GenerationRequest:
     """Build context from newest-first history; stop reading when the allowance is full."""
-    model = profile.preferred_model or default_model
-    if model is None:
-        raise ProviderUnavailable("No generation model is configured")
     instructions = BehaviorCompiler().compile(BehaviorProfile.model_validate(profile))
     prefix = (
         InputMessage("system", PLATFORM_INSTRUCTIONS),
@@ -67,4 +64,4 @@ def build_context(
         selected.append(pair)
         remaining -= size
     messages = tuple(message for pair in reversed(selected) for message in pair)
-    return GenerationRequest(model, (*prefix, *messages, current))
+    return GenerationRequest(model, (*prefix, *messages, current), budget.max_output_tokens)
