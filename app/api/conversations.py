@@ -6,9 +6,15 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.api.assistant import Database, UserId, owned_profile
-from app.api.dependencies import get_provider
+from app.api.dependencies import get_provider, get_streaming_provider
 from app.models import Conversation, Message
-from app.providers import GenerationProvider, ProviderError, ProviderTimeout, ProviderUnavailable
+from app.providers import (
+    GenerationProvider,
+    ProviderError,
+    ProviderTimeout,
+    ProviderUnavailable,
+    StreamingProvider,
+)
 from app.schemas.conversation import (
     ConversationResponse,
     MessageCreate,
@@ -16,7 +22,8 @@ from app.schemas.conversation import (
     TurnResponse,
 )
 from app.services.budget import ContextOverflow
-from app.services.conversation import ConversationError, send_message
+from app.services.conversation import ConversationError, reserve_turn, send_message
+from app.services.streaming import TurnStream
 
 router = APIRouter(prefix="/conversations", tags=["conversations"])
 Limit = Annotated[int, Query(ge=1, le=100)]
@@ -107,3 +114,31 @@ def post_message(
         raise HTTPException(503, "Generation is not configured") from None
     except ProviderError:
         raise HTTPException(502, "Generation failed") from None
+
+
+@router.post("/{conversation_id}/messages/stream", response_class=TurnStream)
+def stream_message(
+    conversation_id: UUID,
+    payload: MessageCreate,
+    user_id: UserId,
+    session: Database,
+    request: Request,
+    provider: Annotated[StreamingProvider, Depends(get_streaming_provider)],
+) -> TurnStream:
+    try:
+        turn = reserve_turn(
+            session, user_id, conversation_id, payload.content, request.app.state.settings
+        )
+    except ConversationError as error:
+        raise HTTPException(error.status_code, error.detail) from None
+    except ContextOverflow:
+        raise HTTPException(
+            422,
+            "Instructions and current message exceed the context budget; "
+            "shorten the message or assistant instructions",
+        ) from None
+    except ProviderUnavailable:
+        raise HTTPException(503, "Generation is not configured") from None
+    return TurnStream(
+        turn, user_id, request.app.state.session_factory, provider, request.app.state.settings
+    )
