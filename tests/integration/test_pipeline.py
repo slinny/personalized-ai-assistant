@@ -64,6 +64,11 @@ def env(engine: Engine, monkeypatch: pytest.MonkeyPatch) -> Iterator[Environment
     monkeypatch.setenv("AUTH_USER_ID", str(user_id))
     monkeypatch.setenv("AUTH_TOKEN", "a" * 32)
     monkeypatch.setenv("OPENAI_MODEL", "test-model")
+    monkeypatch.setenv(
+        "CONTEXT_MODEL_BUDGETS",
+        '{"test-model":{"context_window_tokens":32768},'
+        '"new-model":{"context_window_tokens":16384}}',
+    )
     with Session(engine) as session, session.begin():
         provision(session, user_id)
         profile = session.scalar(

@@ -2,7 +2,11 @@ import pytest
 
 from app.models import AssistantProfile
 from app.providers import ProviderUnavailable
-from app.services.context import MAX_CONTEXT_CHARACTERS, HistoryMessage, build_context
+from app.services.budget import ContextBudget, ContextOverflow
+from app.services.context import HistoryMessage, build_context
+from app.services.tokens import DEFAULT_TOKEN_COUNTER, count_tokens
+
+BUDGET = ContextBudget(32768, 2048, 1024)
 
 
 def profile() -> AssistantProfile:
@@ -27,7 +31,7 @@ def test_context_order_priority_and_failed_turns() -> None:
         HistoryMessage(1, "user", "Question", "completed"),
         HistoryMessage(3, "user", "Failed question", "completed"),
     ]
-    request = build_context(profile(), history, "Next", "fallback")
+    request = build_context(profile(), history, "Next", "fallback", BUDGET)
     assert request.model == "fallback"
     assert [m.role for m in request.messages] == [
         "system",
@@ -43,10 +47,10 @@ def test_context_order_priority_and_failed_turns() -> None:
 def test_model_selection_and_latest_profile() -> None:
     assistant = profile()
     with pytest.raises(ProviderUnavailable):
-        build_context(assistant, [], "Hi", None)
+        build_context(assistant, [], "Hi", None, BUDGET)
     assistant.preferred_model = "preferred"
     assistant.name = "New name"
-    request = build_context(assistant, [], "Hi", "fallback")
+    request = build_context(assistant, [], "Hi", "fallback", BUDGET)
     assert request.model == "preferred"
     assert "New name" in request.messages[1].content
 
@@ -56,8 +60,30 @@ def test_history_limits_keep_whole_recent_pairs() -> None:
         HistoryMessage(i, "user" if i % 2 else "assistant", str(i), "completed")
         for i in range(1, 61)
     ]
-    request = build_context(profile(), history, "Next", "model")
-    assert len(request.messages) == 43
-    assert request.messages[2].content == "21"
-    history[-1] = HistoryMessage(60, "assistant", "x" * MAX_CONTEXT_CHARACTERS, "completed")
-    assert len(build_context(profile(), history, "Next", "model").messages) == 3
+    request = build_context(profile(), history, "Next", "model", BUDGET)
+    assert len(request.messages) == 63
+    assert request.messages[2].content == "1"
+    history[-1] = HistoryMessage(60, "assistant", "x" * BUDGET.context_window_tokens, "completed")
+    assert len(build_context(profile(), history, "Next", "model", BUDGET).messages) == 3
+
+
+def test_exact_budget_and_mandatory_overflow() -> None:
+    request = build_context(profile(), [], "Next", "model", BUDGET)
+    needed = count_tokens(request.messages, DEFAULT_TOKEN_COUNTER)
+    exact = ContextBudget(needed + 2, 1, 1)
+    assert build_context(profile(), [], "Next", "model", exact).messages == request.messages
+    with pytest.raises(ContextOverflow):
+        build_context(profile(), [], "Next!", "model", exact)
+
+
+def test_stop_at_first_nonfitting_pair_without_cherry_picking() -> None:
+    history = [
+        HistoryMessage(1, "user", "old", "completed"),
+        HistoryMessage(2, "assistant", "small", "completed"),
+        HistoryMessage(3, "user", "middle", "completed"),
+        HistoryMessage(4, "assistant", "x" * 32768, "completed"),
+        HistoryMessage(5, "user", "recent", "completed"),
+        HistoryMessage(6, "assistant", "reply", "completed"),
+    ]
+    request = build_context(profile(), history, "Next", "model", BUDGET)
+    assert [m.content for m in request.messages[2:]] == ["recent", "reply", "Next"]

@@ -7,6 +7,7 @@ from app.behavior import BehaviorProfile
 from app.evaluation.schema import Case
 from app.models import AssistantProfile
 from app.providers import GenerationProvider, ProviderError
+from app.services.budget import ContextBudget, ContextOverflow
 from app.services.context import HistoryMessage, build_context
 
 
@@ -31,6 +32,8 @@ def run_cases(
     model: str,
     repeats: int = 1,
     compare: bool = False,
+    *,
+    budget: ContextBudget,
 ) -> list[CaseResult]:
     if not model.strip() or not 1 <= repeats <= 10:
         raise ValueError("A nonblank model and 1–10 repetitions are required")
@@ -58,14 +61,15 @@ def run_cases(
                 )
                 results.append(result)
                 for turn in case.turns:
-                    request = build_context(row, history, turn.content, model)
-                    output = TurnResult(request=[asdict(message) for message in request.messages])
+                    output = TurnResult(request=[])
                     result.turns.append(output)
                     try:
+                        request = build_context(row, history, turn.content, model, budget)
+                        output.request = [asdict(message) for message in request.messages]
                         response = provider.generate(request).text
                         if not response.strip():
                             raise ProviderError("Empty response")
-                    except ProviderError as exc:
+                    except (ProviderError, ContextOverflow) as exc:
                         output.error = type(exc).__name__
                         break
                     output.response = response

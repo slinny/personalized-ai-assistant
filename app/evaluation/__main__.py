@@ -8,9 +8,10 @@ from app.core.config import Settings
 from app.evaluation.report import write_report
 from app.evaluation.runner import run_cases
 from app.evaluation.schema import load_suite
-from app.providers import GenerationResult
+from app.providers import GenerationResult, ProviderUnavailable
 from app.providers.fake import FakeProvider
 from app.providers.openai import OpenAIProvider
+from app.services.budget import ContextBudget, resolve_budget
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -43,6 +44,10 @@ def main(argv: list[str] | None = None) -> int:
     model = args.model or (settings.openai_model if settings else "offline-fake")
     if not model or not model.strip():
         parser.error("A nonblank model is required")
+    try:
+        budget = resolve_budget(model, settings) if settings else ContextBudget(32768, 2048, 1024)
+    except ProviderUnavailable:
+        parser.error("Live execution requires a CONTEXT_MODEL_BUDGETS entry for the selected model")
     metadata = {
         "mode": "live" if args.live else "offline-fake",
         "model": model,
@@ -70,13 +75,14 @@ def main(argv: list[str] | None = None) -> int:
                 model,
                 args.repeats,
                 args.compare,
+                budget=budget,
             )
     else:
         count = sum(len(case.turns) for case in cases) * args.repeats * (2 if args.compare else 1)
         provider = FakeProvider(
             *(GenerationResult("OFFLINE FAKE: no model behavior measured.") for _ in range(count))
         )
-        results = run_cases(cases, provider, model, args.repeats, args.compare)
+        results = run_cases(cases, provider, model, args.repeats, args.compare, budget=budget)
     report = write_report(results, args.output, metadata)
     print(f"{metadata['mode']}: {report['counts']}; report: {args.output / 'report.md'}")
     if report["counts"]["error"]:

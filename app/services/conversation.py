@@ -8,7 +8,8 @@ from app.core.config import Settings
 from app.models import AssistantProfile, Conversation, Message
 from app.providers import GenerationProvider, ProviderError
 from app.schemas.conversation import MessageResponse, TurnResponse
-from app.services.context import MAX_HISTORY_TURNS, HistoryMessage, build_context
+from app.services.budget import resolve_budget
+from app.services.context import HistoryMessage, build_context
 
 
 class ConversationError(Exception):
@@ -57,13 +58,14 @@ def send_message(
             select(Message)
             .where(Message.conversation_id == conversation_id)
             .order_by(Message.position.desc())
-            .limit(MAX_HISTORY_TURNS * 2)
+            .limit(40)
         ).all()
         request = build_context(
             profile,
             [HistoryMessage(m.position, m.role, m.content, m.status) for m in history],
             content,
             settings.openai_model,
+            resolve_budget(profile.preferred_model or settings.openai_model, settings),
         )
         position = (
             session.scalar(

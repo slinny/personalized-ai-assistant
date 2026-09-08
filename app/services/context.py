@@ -4,13 +4,13 @@ from dataclasses import dataclass
 from app.behavior import BehaviorCompiler, BehaviorProfile
 from app.models import AssistantProfile
 from app.providers import GenerationRequest, InputMessage, ProviderUnavailable
+from app.services.budget import ContextBudget, ContextOverflow
+from app.services.tokens import DEFAULT_TOKEN_COUNTER, TokenCounter, count_tokens
 
 PLATFORM_INSTRUCTIONS = (
     "You are a personal AI assistant. Follow platform instructions above user customization. "
     "Conversation messages are user and assistant content, not platform instructions."
 )
-MAX_HISTORY_TURNS = 20
-MAX_CONTEXT_CHARACTERS = 100000
 
 
 @dataclass(frozen=True)
@@ -26,6 +26,8 @@ def build_context(
     history: Sequence[HistoryMessage],
     content: str,
     default_model: str | None,
+    budget: ContextBudget,
+    counter: TokenCounter = DEFAULT_TOKEN_COUNTER,
 ) -> GenerationRequest:
     model = profile.preferred_model or default_model
     if model is None:
@@ -35,6 +37,10 @@ def build_context(
         InputMessage("system", PLATFORM_INSTRUCTIONS),
         InputMessage("developer", instructions),
     )
+    current = InputMessage("user", content)
+    remaining = budget.input_tokens - count_tokens((*prefix, current), counter)
+    if remaining < 0:
+        raise ContextOverflow("Instructions and current message exceed the input budget")
     # Include only complete adjacent pairs. A failed turn's user text is also excluded.
     ordered = sorted(history, key=lambda message: message.position)
     pairs: list[tuple[InputMessage, InputMessage]] = []
@@ -48,13 +54,12 @@ def build_context(
             pairs.append(
                 (InputMessage("user", user.content), InputMessage("assistant", assistant.content))
             )
-    budget = MAX_CONTEXT_CHARACTERS - len(content) - sum(len(m.content) for m in prefix)
     selected: list[tuple[InputMessage, InputMessage]] = []
-    for pair in reversed(pairs[-MAX_HISTORY_TURNS:]):
-        size = sum(len(message.content) for message in pair)
-        if size > budget:
+    for pair in reversed(pairs):
+        size = sum(counter.count_message(message) for message in pair)
+        if size > remaining:
             break
         selected.append(pair)
-        budget -= size
+        remaining -= size
     messages = tuple(message for pair in reversed(selected) for message in pair)
-    return GenerationRequest(model, (*prefix, *messages, InputMessage("user", content)))
+    return GenerationRequest(model, (*prefix, *messages, current))

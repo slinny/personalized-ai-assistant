@@ -42,6 +42,11 @@ def test_send_lifecycle(session: Session, monkeypatch: pytest.MonkeyPatch) -> No
     monkeypatch.setenv("AUTH_TOKEN", "a" * 32)
     monkeypatch.setenv("AUTH_USER_ID", str(user_id))
     monkeypatch.setenv("OPENAI_MODEL", "test-model")
+    monkeypatch.setenv(
+        "CONTEXT_MODEL_BUDGETS",
+        '{"test-model":{"context_window_tokens":32768},'
+        '"new-model":{"context_window_tokens":16384}}',
+    )
     app = create_app()
     fake = FakeProvider(GenerationResult("Hello"), ProviderTimeout("secret"))
     app.dependency_overrides[get_session] = lambda: session

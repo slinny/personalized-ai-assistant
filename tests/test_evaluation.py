@@ -4,6 +4,9 @@ import pytest
 from pydantic import ValidationError
 
 from app.evaluation.schema import Case, Check, Suite
+from app.services.budget import ContextBudget
+
+BUDGET = ContextBudget(32768, 2048, 1024)
 
 
 def sample_case() -> Case:
@@ -42,7 +45,7 @@ def test_runner_history_errors_and_repetition_isolation() -> None:
         GenerationResult("Ada"),
         GenerationResult("Still Ada"),
     )
-    results = run_cases([case], provider, "test-model", repeats=2)
+    results = run_cases([case], provider, "test-model", repeats=2, budget=BUDGET)
     assert results[0].turns[1].error == "ProviderTimeout"
     assert provider.requests[1].messages[-2].content == "Ada"
     assert len(provider.requests[2].messages) == 3
@@ -83,6 +86,7 @@ def test_report_distinguishes_fail_error_and_pending(tmp_path: "Path") -> None:
         ),
         "test",
         repeats=3,
+        budget=BUDGET,
     )
     report = write_report(results, tmp_path, {"mode": "offline"})
     assert report["counts"] == {"error": 1, "fail": 1, "pending_review": 1}
@@ -97,7 +101,7 @@ def test_comparison_isolates_arms_and_preserves_model() -> None:
     from app.providers.fake import FakeProvider
 
     provider = FakeProvider(GenerationResult("Ada"), GenerationResult("Assistant"))
-    results = run_cases([sample_case()], provider, "same-model", compare=True)
+    results = run_cases([sample_case()], provider, "same-model", compare=True, budget=BUDGET)
     assert [result.arm for result in results] == ["customized", "default"]
     assert all(request.model == "same-model" for request in provider.requests)
     assert all(len(request.messages) == 3 for request in provider.requests)
@@ -149,6 +153,6 @@ def test_empty_response_stops_case() -> None:
     case = sample_case()
     case.turns.append(Turn(content="Next", rubric="Answer"))
     provider = FakeProvider(GenerationResult(" "))
-    result = run_cases([case], provider, "test")[0]
+    result = run_cases([case], provider, "test", budget=BUDGET)[0]
     assert len(result.turns) == len(provider.requests) == 1
     assert result.turns[0].error == "ProviderError"
