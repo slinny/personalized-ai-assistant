@@ -1,3 +1,5 @@
+import logging
+from dataclasses import asdict
 from datetime import timedelta
 from uuid import UUID
 
@@ -11,6 +13,8 @@ from app.schemas.conversation import MessageResponse, TurnResponse
 from app.services.budget import resolve_budget
 from app.services.context import build_context
 from app.services.history import iter_history
+
+logger = logging.getLogger(__name__)
 
 
 class ConversationError(Exception):
@@ -97,6 +101,16 @@ def send_message(
         raise
 
     # No transaction or row lock remains open while waiting for the provider.
+    assert request.context is not None
+    logger.info(
+        "Conversation context assembled",
+        extra={
+            "context_budget": asdict(request.context),
+            "history_scan_limit_reached": (
+                request.context.scanned_messages >= settings.context_history_scan_limit
+            ),
+        },
+    )
     failure: ProviderError | None = None
     text = ""
     try:

@@ -118,3 +118,24 @@ def test_history_consumption_stops_when_pair_does_not_fit() -> None:
 
     request = build_context(profile(), history(), "Next", "model", BUDGET)
     assert len(request.messages) == 3
+    assert request.context is not None
+    assert request.context.scanned_messages == 2
+    assert request.context.dropped_scanned_turns == 1
+    assert request.context.included_turns == 0
+    assert request.context.stopped_at_budget
+
+
+def test_context_diagnostics_match_request_and_budget() -> None:
+    history = [
+        HistoryMessage(2, "assistant", "answer", "completed"),
+        HistoryMessage(1, "user", "question", "completed"),
+    ]
+    request = build_context(profile(), history, "next", "model", BUDGET)
+    diagnostics = request.context
+    assert diagnostics is not None
+    assert diagnostics.estimated_input_tokens == count_tokens(
+        request.messages, DEFAULT_TOKEN_COUNTER
+    )
+    assert diagnostics.estimated_input_tokens <= diagnostics.input_budget_tokens
+    assert diagnostics.scanned_messages == 2 and diagnostics.included_turns == 1
+    assert diagnostics.dropped_scanned_turns == 0 and not diagnostics.stopped_at_budget

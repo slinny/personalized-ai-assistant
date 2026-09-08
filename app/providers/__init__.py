@@ -11,10 +11,26 @@ class InputMessage:
 
 
 @dataclass(frozen=True)
+class ContextDiagnostics:
+    estimator: str
+    context_window_tokens: int
+    input_budget_tokens: int
+    mandatory_input_tokens: int
+    estimated_input_tokens: int
+    reserved_output_tokens: int
+    safety_margin_tokens: int
+    scanned_messages: int
+    included_turns: int
+    dropped_scanned_turns: int
+    stopped_at_budget: bool
+
+
+@dataclass(frozen=True)
 class GenerationRequest:
     model: str
     messages: tuple[InputMessage, ...]
     max_output_tokens: int
+    context: ContextDiagnostics | None = None
 
     def __post_init__(self) -> None:
         if type(self.max_output_tokens) is not int or self.max_output_tokens <= 0:

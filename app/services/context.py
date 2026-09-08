@@ -4,7 +4,7 @@ from itertools import pairwise
 
 from app.behavior import BehaviorCompiler, BehaviorProfile
 from app.models import AssistantProfile
-from app.providers import GenerationRequest, InputMessage
+from app.providers import ContextDiagnostics, GenerationRequest, InputMessage
 from app.services.budget import ContextBudget, ContextOverflow
 from app.services.tokens import DEFAULT_TOKEN_COUNTER, TokenCounter, count_tokens
 
@@ -53,15 +53,41 @@ def build_context(
         InputMessage("developer", instructions),
     )
     current = InputMessage("user", content)
-    remaining = budget.input_tokens - count_tokens((*prefix, current), counter)
+    mandatory_tokens = count_tokens((*prefix, current), counter)
+    remaining = budget.input_tokens - mandatory_tokens
     if remaining < 0:
         raise ContextOverflow("Instructions and current message exceed the input budget")
     selected: list[tuple[InputMessage, InputMessage]] = []
-    for pair in recent_pairs(history):
+    scanned_messages = 0
+    dropped_scanned_turns = 0
+
+    def counted_history() -> Iterator[HistoryMessage]:
+        nonlocal scanned_messages
+        for message in history:
+            scanned_messages += 1
+            yield message
+
+    for pair in recent_pairs(counted_history()):
         size = sum(counter.count_message(message) for message in pair)
         if size > remaining:
+            dropped_scanned_turns = 1
             break
         selected.append(pair)
         remaining -= size
     messages = tuple(message for pair in reversed(selected) for message in pair)
-    return GenerationRequest(model, (*prefix, *messages, current), budget.max_output_tokens)
+    diagnostics = ContextDiagnostics(
+        estimator=counter.name,
+        context_window_tokens=budget.context_window_tokens,
+        input_budget_tokens=budget.input_tokens,
+        mandatory_input_tokens=mandatory_tokens,
+        estimated_input_tokens=budget.input_tokens - remaining,
+        reserved_output_tokens=budget.max_output_tokens,
+        safety_margin_tokens=budget.safety_margin_tokens,
+        scanned_messages=scanned_messages,
+        included_turns=len(selected),
+        dropped_scanned_turns=dropped_scanned_turns,
+        stopped_at_budget=bool(dropped_scanned_turns),
+    )
+    return GenerationRequest(
+        model, (*prefix, *messages, current), budget.max_output_tokens, diagnostics
+    )

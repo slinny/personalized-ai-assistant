@@ -438,3 +438,23 @@ def test_model_output_budget_is_snapshotted_before_provider_call(env: Environmen
     fake = FakeProvider(GenerationResult("Second"))
     env.send(fake)
     assert fake.requests[0].max_output_tokens == 512
+
+
+def test_context_logs_counts_without_content(
+    env: Environment, caplog: pytest.LogCaptureFixture
+) -> None:
+    import json
+    import logging
+
+    fake = FakeProvider(GenerationResult("private assistant text"))
+    with caplog.at_level(logging.INFO, logger="app.services.conversation"):
+        env.send(fake, "private user text")
+    records = [r for r in caplog.records if r.name == "app.services.conversation"]
+    assert len(records) == 1
+    fields = vars(records[0])
+    assert fields["context_budget"]["included_turns"] == 0
+    assert fields["context_budget"]["estimated_input_tokens"] > 0
+    assert not fields["history_scan_limit_reached"]
+    serialized = json.dumps(fields, default=str)
+    assert "private user text" not in serialized and "private assistant text" not in serialized
+    assert "Be kind" not in serialized
