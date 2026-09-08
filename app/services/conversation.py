@@ -114,6 +114,7 @@ def reserve_turn(
         "Conversation context assembled",
         extra={
             "context_budget": asdict(request.context),
+            "recovered_turns": len(active),
             "history_scan_limit_reached": (request.context.scanned_messages >= history_scan_limit),
         },
     )

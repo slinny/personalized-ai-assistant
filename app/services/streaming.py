@@ -2,8 +2,10 @@
 
 import asyncio
 import logging
-from collections.abc import Callable
+from collections.abc import AsyncIterator, Callable
 from contextlib import suppress
+from datetime import UTC, datetime
+from time import monotonic
 from typing import Literal
 from uuid import UUID
 
@@ -60,6 +62,11 @@ class TurnStream(Response):
         self.text = ""
         self.sequence = 0
         self.terminal = False
+        self.outcome = "outcome_unknown"
+        self.started_at = monotonic()
+        self.first_delta_seconds: float | None = None
+        self.cancellation_observed_seconds: float | None = None
+        self.cleanup_status: Literal["cancelled", "failed"] = "cancelled"
 
     async def save(
         self,
@@ -103,6 +110,11 @@ class TurnStream(Response):
 
     def terminal_event(self, message: MessageResponse, code: FailureCode | None = None) -> bytes:
         self.terminal = True
+        self.outcome = message.status
+        if message.status == "cancelled":
+            self.cancellation_observed_seconds = max(
+                0, (datetime.now(UTC) - message.updated_at).total_seconds()
+            )
         name: Literal["message.completed", "message.cancelled", "message.failed"]
         if message.status == "completed":
             name = "message.completed"
@@ -117,11 +129,25 @@ class TurnStream(Response):
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         outgoing, incoming = anyio.create_memory_object_stream[bytes](1)
-        iterator = self.provider.stream(self.turn.request)
+        iterator: AsyncIterator[TextDelta | StreamCompleted] | None = None
         next_event: asyncio.Task[TextDelta | StreamCompleted] | None = None
 
         async def pull() -> TextDelta | StreamCompleted:
+            assert iterator is not None
             return await anext(iterator)
+
+        async def stop_upstream() -> None:
+            nonlocal next_event
+            if next_event is not None:
+                next_event.cancel()
+                with suppress(asyncio.CancelledError, Exception):
+                    await next_event
+                next_event = None
+            close = getattr(iterator, "aclose", None)
+            if close is not None:
+                with suppress(Exception):
+                    with anyio.fail_after(self.settings.stream_send_timeout_seconds):
+                        await close()
 
         async def emit(frame: bytes) -> None:
             with anyio.fail_after(self.settings.stream_send_timeout_seconds):
@@ -151,7 +177,7 @@ class TurnStream(Response):
                     return
 
         async def generate() -> None:
-            nonlocal next_event
+            nonlocal next_event, iterator
             loop = asyncio.get_running_loop()
             start = last_activity = last_save = last_poll = last_heartbeat = loop.time()
             size = 0
@@ -165,6 +191,7 @@ class TurnStream(Response):
                         ),
                     )
                 )
+                iterator = self.provider.stream(self.turn.request)
                 next_event = asyncio.create_task(pull())
                 while True:
                     now = loop.time()
@@ -180,6 +207,7 @@ class TurnStream(Response):
                         if checkpoint:
                             last_save = now
                         if saved.status != "in_progress":
+                            await stop_upstream()
                             await emit(self.terminal_event(saved))
                             break
                     if now - last_heartbeat >= self.settings.stream_heartbeat_seconds:
@@ -194,6 +222,8 @@ class TurnStream(Response):
                     ready, _ = await asyncio.wait({next_event}, timeout=wait)
                     if not ready:
                         continue
+                    if loop.time() - start >= self.settings.stream_deadline_seconds:
+                        raise ProviderTimeout("Generation timed out")
                     try:
                         event = next_event.result()
                     except StopAsyncIteration:
@@ -203,6 +233,7 @@ class TurnStream(Response):
                     if isinstance(event, StreamCompleted):
                         if not self.text.strip():
                             raise ProviderError("Generation returned no text")
+                        await stop_upstream()
                         saved = await self.save("completed", self.text)
                         await emit(self.terminal_event(saved))
                         break
@@ -211,12 +242,16 @@ class TurnStream(Response):
                         raise OutputLimit("Output limit reached")
                     self.text += event.text
                     if event.text:
+                        if self.first_delta_seconds is None:
+                            self.first_delta_seconds = monotonic() - self.started_at
                         await emit(self.event("message.delta", Delta(text=event.text)))
                     next_event = asyncio.create_task(pull())
             except TimeoutError:
                 # Delivery backpressure cancels this turn in the response cleanup.
                 raise
             except Exception as error:
+                self.cleanup_status = "failed"
+                await stop_upstream()
                 # No exception messages are exposed, including unexpected adapter failures.
                 code: FailureCode = (
                     "generation_timeout"
@@ -243,17 +278,21 @@ class TurnStream(Response):
         finally:
             # Shield cleanup from the request's cancellation scope, not from process death.
             with anyio.CancelScope(shield=True):
-                if next_event is not None:
-                    next_event.cancel()
-                    with suppress(asyncio.CancelledError, Exception):
-                        await next_event
-                close = getattr(iterator, "aclose", None)
-                if close is not None:
-                    with suppress(Exception):
-                        with anyio.fail_after(self.settings.stream_send_timeout_seconds):
-                            await close()
+                await stop_upstream()
                 if not self.terminal:
                     try:
-                        await self.save("cancelled", self.text)
+                        saved = await self.save(self.cleanup_status, self.text)
+                        self.outcome = saved.status
                     except Exception:
                         logger.warning("Streaming cleanup could not persist outcome")
+                logger.info(
+                    "Streaming turn ended",
+                    extra={
+                        "stream_metrics": {
+                            "outcome": self.outcome,
+                            "duration_seconds": monotonic() - self.started_at,
+                            "first_delta_seconds": self.first_delta_seconds,
+                            "cancellation_observed_seconds": self.cancellation_observed_seconds,
+                        }
+                    },
+                )
