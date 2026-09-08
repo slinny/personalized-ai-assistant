@@ -32,3 +32,6 @@ select = ["E", "F", "I", "UP", "B"]
 python_version = "3.12"
 strict = true
 files = ["app", "tests"]
+
+[tool.setuptools.package-data]
+app = ["test_client/*.html", "test_client/*.css", "test_client/*.mjs"]

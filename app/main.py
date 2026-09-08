@@ -1,7 +1,9 @@
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
 from openai import AsyncOpenAI, OpenAI
 
 from app.api.assistant import router as assistant_router
@@ -52,6 +54,11 @@ def create_app() -> FastAPI:
 
     application = FastAPI(title=settings.app_name, lifespan=lifespan)
     application.state.settings = settings
+    application.mount(
+        "/test-client",
+        StaticFiles(directory=Path(__file__).parent / "test_client", html=True),
+        name="test-client",
+    )
     application.include_router(router)
     application.include_router(assistant_router)
     application.include_router(conversations_router)

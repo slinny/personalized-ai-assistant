@@ -410,3 +410,34 @@ The adapter consumes typed text and completion events as described in the
 checked alongside installed SDK 2.54.0. EOF, incomplete responses, and blank
 output are failures. Automated validation uses fakes/mocked SDKs, including real
 loopback HTTP transport tests; no paid provider calls are required.
+
+## Browser test client
+
+Start the API using the local Python or Docker instructions above, apply migrations,
+and provision the assistant. Open **http://localhost:8000/test-client/** and paste
+`AUTH_TOKEN` into the connection form. The token stays in page memory, is cleared
+on disconnect/reload, and is never stored in browser storage. The static page is
+public; every assistant/conversation request still requires bearer authentication.
+No frontend dependencies, build step, or CORS configuration are needed.
+
+Create/select a conversation, send a message, and use **Stop** during generation.
+Saved history is fetched in pages of 100; **Load more** pages the conversation list.
+**Refresh history** reconciles durable state after an interrupted request. No send
+is automatically retried. If history cannot be fetched, sending stays disabled until
+refresh succeeds. An active server turn may return 409 until it finishes or its lease
+expires. Profile settings apply to the next turn; greeting settings retain the
+backend's existing behavior and do not schedule proactive messages.
+
+Manual smoke checklist (use a disposable development database):
+
+- Invalid token shows an error; valid token loads settings and conversations.
+- Create a conversation, send, observe incremental text, and stop a long response.
+- Reload, reconnect, and select the conversation to verify saved history.
+- Save profile changes and verify them after reconnecting.
+- Interrupt a stream and refresh history before deciding whether to resend.
+- With a configured real provider, compare default/customized behavior using the
+  evaluation CLI above. Real-model smoke tests make paid provider calls.
+
+Run `pytest -q` (set `TEST_DATABASE_URL` for database tests) and
+`node --test examples/stream-client.test.mjs`. The example re-exports the same stream
+implementation shipped with the browser client.

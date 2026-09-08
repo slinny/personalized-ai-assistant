@@ -346,3 +346,19 @@ docker run --rm --network container:assistant-task8-test \
   assistant-task8-validation sh -c \
   'python --version && pytest -q && ruff check . && ruff format --check . && mypy && pip check'
 ```
+
+## Browser test client — 2026-09-08
+
+- Full regression against disposable PostgreSQL 17: **258 passed**, no skips.
+- Shared streaming helper: **4 Node tests passed**. Client JavaScript syntax,
+  Ruff lint/format, mypy, and diff whitespace checks passed.
+- Browser smoke against FastAPI plus disposable PostgreSQL and a delayed fake
+  streaming provider: connected, saved a profile, created a conversation, observed
+  a completed response, stopped another response, reloaded/reconnected, and
+  verified both durable message statuses and saved settings. Visually inspected
+  the desktop layout and corrected overflowing settings layout.
+- Static asset test verifies page redirect/loading, JavaScript and CSS MIME types,
+  missing-asset 404, and unchanged API authentication requirements.
+- No real model calls were made. The complete Compose stack and mobile browser
+  layout were not exercised in this change. Two existing dependency deprecation
+  warnings remain.

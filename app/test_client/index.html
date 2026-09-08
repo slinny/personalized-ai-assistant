@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Assistant · Test client</title><link rel="stylesheet" href="/test-client/style.css">
+<script type="module" src="/test-client/client.mjs"></script>
+</head>
+<body>
+<header><div><small>LOCAL WORKSPACE</small><h1>Assistant playground</h1></div><span class="badge">Test client</span></header>
+<form id="connection"><label>Bearer token <input id="token" type="password" required autocomplete="off" placeholder="Paste your AUTH_TOKEN"></label><button>Connect</button><button id="disconnect" type="button" disabled>Disconnect</button><span>Kept in memory. Reload to clear.</span></form>
+<p id="notice" role="status" aria-live="polite">Connect to load your assistant and conversations.</p>
+<main>
+<aside><h2>Conversations</h2><button id="new" disabled>+ New conversation</button><nav id="conversations" aria-label="Conversations"></nav><button id="more" disabled>Load more</button></aside>
+<section class="chat"><div class="section-head"><h2 id="chat-title">Start a conversation</h2><button id="refresh" disabled>Refresh history</button></div><div id="messages" role="log" aria-label="Messages"><p class="empty">Your saved messages will appear here.</p></div><form id="composer"><label for="content">Message</label><textarea id="content" rows="3" maxlength="20000" placeholder="Try a conversation with your assistant…" required disabled></textarea><div class="actions"><span id="turn-status">Ready when you are.</span><button id="stop" type="button" disabled>Stop</button><button id="send" disabled>Send</button></div></form></section>
+<aside class="settings"><h2>Assistant settings</h2><p>Saved changes apply to the next turn.</p><form id="profile"><fieldset id="profile-fields" disabled></fieldset><button id="save" disabled>Save settings</button></form></aside>
+</main>
+</body></html>
