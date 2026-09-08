@@ -1,5 +1,6 @@
 """Provider-independent generation contracts."""
 
+from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from typing import Literal, Protocol
 
@@ -56,3 +57,19 @@ class ProviderUnavailable(ProviderError):
 
 class GenerationProvider(Protocol):
     def generate(self, request: GenerationRequest) -> GenerationResult: ...
+
+
+@dataclass(frozen=True)
+class TextDelta:
+    text: str
+
+
+@dataclass(frozen=True)
+class StreamCompleted:
+    """Explicit upstream success; end of iteration alone is not completion."""
+
+
+class StreamingProvider(Protocol):
+    def stream(
+        self, request: GenerationRequest
+    ) -> "AsyncIterator[TextDelta | StreamCompleted]": ...
