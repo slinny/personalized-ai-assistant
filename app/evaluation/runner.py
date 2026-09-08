@@ -64,7 +64,7 @@ def run_cases(
                     output = TurnResult(request=[])
                     result.turns.append(output)
                     try:
-                        request = build_context(row, history, turn.content, model, budget)
+                        request = build_context(row, reversed(history), turn.content, model, budget)
                         output.request = [asdict(message) for message in request.messages]
                         response = provider.generate(request).text
                         if not response.strip():

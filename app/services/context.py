@@ -1,5 +1,6 @@
-from collections.abc import Sequence
+from collections.abc import Iterable, Iterator
 from dataclasses import dataclass
+from itertools import pairwise
 
 from app.behavior import BehaviorCompiler, BehaviorProfile
 from app.models import AssistantProfile
@@ -21,14 +22,31 @@ class HistoryMessage:
     status: str
 
 
+def recent_pairs(
+    history: Iterable[HistoryMessage],
+) -> Iterator[tuple[InputMessage, InputMessage]]:
+    """Consume strictly newest-first history, preserving pairs across batch boundaries."""
+    for assistant, user in pairwise(history):
+        if user.position >= assistant.position:
+            raise ValueError("History must have strictly descending positions")
+        if (
+            user.role == "user"
+            and assistant.role == "assistant"
+            and user.status == assistant.status == "completed"
+            and assistant.position == user.position + 1
+        ):
+            yield InputMessage("user", user.content), InputMessage("assistant", assistant.content)
+
+
 def build_context(
     profile: AssistantProfile,
-    history: Sequence[HistoryMessage],
+    history: Iterable[HistoryMessage],
     content: str,
     default_model: str | None,
     budget: ContextBudget,
     counter: TokenCounter = DEFAULT_TOKEN_COUNTER,
 ) -> GenerationRequest:
+    """Build context from newest-first history; stop reading when the allowance is full."""
     model = profile.preferred_model or default_model
     if model is None:
         raise ProviderUnavailable("No generation model is configured")
@@ -41,21 +59,8 @@ def build_context(
     remaining = budget.input_tokens - count_tokens((*prefix, current), counter)
     if remaining < 0:
         raise ContextOverflow("Instructions and current message exceed the input budget")
-    # Include only complete adjacent pairs. A failed turn's user text is also excluded.
-    ordered = sorted(history, key=lambda message: message.position)
-    pairs: list[tuple[InputMessage, InputMessage]] = []
-    for user, assistant in zip(ordered, ordered[1:], strict=False):
-        if (
-            user.role == "user"
-            and assistant.role == "assistant"
-            and user.status == assistant.status == "completed"
-            and assistant.position == user.position + 1
-        ):
-            pairs.append(
-                (InputMessage("user", user.content), InputMessage("assistant", assistant.content))
-            )
     selected: list[tuple[InputMessage, InputMessage]] = []
-    for pair in reversed(pairs):
+    for pair in recent_pairs(history):
         size = sum(counter.count_message(message) for message in pair)
         if size > remaining:
             break

@@ -9,7 +9,8 @@ from app.models import AssistantProfile, Conversation, Message
 from app.providers import GenerationProvider, ProviderError
 from app.schemas.conversation import MessageResponse, TurnResponse
 from app.services.budget import resolve_budget
-from app.services.context import HistoryMessage, build_context
+from app.services.context import build_context
+from app.services.history import iter_history
 
 
 class ConversationError(Exception):
@@ -54,15 +55,9 @@ def send_message(
             message.status = "failed"
         profile = session.get(AssistantProfile, conversation.assistant_profile_id)
         assert profile is not None
-        history = session.scalars(
-            select(Message)
-            .where(Message.conversation_id == conversation_id)
-            .order_by(Message.position.desc())
-            .limit(40)
-        ).all()
         request = build_context(
             profile,
-            [HistoryMessage(m.position, m.role, m.content, m.status) for m in history],
+            iter_history(session, conversation_id, settings.context_history_scan_limit),
             content,
             settings.openai_model,
             resolve_budget(profile.preferred_model or settings.openai_model, settings),

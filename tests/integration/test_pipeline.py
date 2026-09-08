@@ -18,7 +18,9 @@ from app.models import AssistantProfile, Conversation, Message, User
 from app.providers import GenerationRequest, GenerationResult, ProviderError, ProviderTimeout
 from app.providers.fake import FakeProvider
 from app.schemas.conversation import TurnResponse
+from app.services.context import recent_pairs
 from app.services.conversation import ConversationError, send_message
+from app.services.history import iter_history
 
 
 @dataclass
@@ -372,3 +374,47 @@ def test_context_rejection_is_atomic(env: Environment, failure: str) -> None:
     with Session(env.engine) as session:
         conversation = session.get(Conversation, env.conversation_id)
         assert conversation is not None and conversation.updated_at == timestamp
+
+
+def seed_history(env: Environment, count: int) -> None:
+    with Session(env.engine) as session, session.begin():
+        session.add_all(
+            Message(
+                conversation_id=env.conversation_id,
+                position=position,
+                role="user" if position % 2 else "assistant",
+                content=f"message {position}",
+                status="completed",
+            )
+            for position in range(1, count + 1)
+        )
+
+
+@pytest.mark.parametrize("scan_limit,expected_pairs", [(10000, 60), (63, 31)])
+def test_history_beyond_forty_messages_and_scan_limit(
+    env: Environment, scan_limit: int, expected_pairs: int
+) -> None:
+    seed_history(env, 120)
+    before = [(m.id, m.content, m.status) for m in env.messages()]
+    env.settings.context_history_scan_limit = scan_limit
+    fake = FakeProvider(GenerationResult("New reply"))
+    env.send(fake, "Next")
+    messages = fake.requests[0].messages
+    assert len(messages) == 3 + expected_pairs * 2
+    assert messages[2].content == f"message {121 - expected_pairs * 2}"
+    assert messages[-2].content == "message 120"
+    assert messages[-1].content == "Next"
+    assert [(m.id, m.content, m.status) for m in env.messages()[:120]] == before
+
+
+def test_pairs_across_odd_batch_boundaries(env: Environment) -> None:
+    seed_history(env, 8)
+    with Session(env.engine) as session:
+        history = iter_history(session, env.conversation_id, 100, batch_size=3)
+        pairs = list(recent_pairs(history))
+    assert [(u.content, a.content) for u, a in pairs] == [
+        ("message 7", "message 8"),
+        ("message 5", "message 6"),
+        ("message 3", "message 4"),
+        ("message 1", "message 2"),
+    ]

@@ -43,6 +43,7 @@ class Settings(BaseSettings):
     openai_timeout_seconds: float = Field(default=30, gt=0, le=120, allow_inf_nan=False)
     openai_max_output_tokens: int = Field(default=2048, ge=1, le=16000)
     context_model_budgets: dict[str, ModelBudgetConfig] = Field(default_factory=dict)
+    context_history_scan_limit: int = Field(default=10000, ge=2, le=100000)
     generation_lease_seconds: int = Field(default=180, ge=1, le=3600)
 
     @model_validator(mode="after")

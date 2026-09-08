@@ -1,3 +1,5 @@
+from collections.abc import Iterator
+
 import pytest
 
 from app.models import AssistantProfile
@@ -31,7 +33,13 @@ def test_context_order_priority_and_failed_turns() -> None:
         HistoryMessage(1, "user", "Question", "completed"),
         HistoryMessage(3, "user", "Failed question", "completed"),
     ]
-    request = build_context(profile(), history, "Next", "fallback", BUDGET)
+    request = build_context(
+        profile(),
+        sorted(history, key=lambda m: m.position, reverse=True),
+        "Next",
+        "fallback",
+        BUDGET,
+    )
     assert request.model == "fallback"
     assert [m.role for m in request.messages] == [
         "system",
@@ -60,11 +68,24 @@ def test_history_limits_keep_whole_recent_pairs() -> None:
         HistoryMessage(i, "user" if i % 2 else "assistant", str(i), "completed")
         for i in range(1, 61)
     ]
-    request = build_context(profile(), history, "Next", "model", BUDGET)
+    request = build_context(
+        profile(), sorted(history, key=lambda m: m.position, reverse=True), "Next", "model", BUDGET
+    )
     assert len(request.messages) == 63
     assert request.messages[2].content == "1"
     history[-1] = HistoryMessage(60, "assistant", "x" * BUDGET.context_window_tokens, "completed")
-    assert len(build_context(profile(), history, "Next", "model", BUDGET).messages) == 3
+    assert (
+        len(
+            build_context(
+                profile(),
+                sorted(history, key=lambda m: m.position, reverse=True),
+                "Next",
+                "model",
+                BUDGET,
+            ).messages
+        )
+        == 3
+    )
 
 
 def test_exact_budget_and_mandatory_overflow() -> None:
@@ -85,5 +106,17 @@ def test_stop_at_first_nonfitting_pair_without_cherry_picking() -> None:
         HistoryMessage(5, "user", "recent", "completed"),
         HistoryMessage(6, "assistant", "reply", "completed"),
     ]
-    request = build_context(profile(), history, "Next", "model", BUDGET)
+    request = build_context(
+        profile(), sorted(history, key=lambda m: m.position, reverse=True), "Next", "model", BUDGET
+    )
     assert [m.content for m in request.messages[2:]] == ["recent", "reply", "Next"]
+
+
+def test_history_consumption_stops_when_pair_does_not_fit() -> None:
+    def history() -> Iterator[HistoryMessage]:
+        yield HistoryMessage(4, "assistant", "x" * 32768, "completed")
+        yield HistoryMessage(3, "user", "recent", "completed")
+        raise AssertionError("Older history should not be read")
+
+    request = build_context(profile(), history(), "Next", "model", BUDGET)
+    assert len(request.messages) == 3
