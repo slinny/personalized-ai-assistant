@@ -184,3 +184,45 @@ def test_lease_renewal_and_late_worker(env: Environment, expire: bool) -> None: 
     else:
         assert "message.completed" in response.text
         assert env.messages()[1].content == "partial"
+
+
+def test_abrupt_process_loss_preserves_checkpoint_and_recovers(env: Environment) -> None:  # noqa: F811
+    import subprocess
+    import sys
+
+    script = """
+import os, sys
+from uuid import UUID
+from sqlalchemy import create_engine
+from sqlalchemy.orm import Session
+from app.core.config import Settings
+from app.services.conversation import reserve_turn, update_turn
+engine = create_engine(sys.argv[1])
+settings = Settings()
+user, conversation = UUID(sys.argv[2]), UUID(sys.argv[3])
+with Session(engine) as session:
+    turn = reserve_turn(session, user, conversation, "interrupted", settings)
+    update_turn(session, user, conversation, turn.assistant_message.id,
+                settings, status="in_progress", content="durable prefix")
+os._exit(0)
+"""
+    subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            script,
+            env.engine.url.render_as_string(hide_password=False),
+            str(env.user_id),
+            str(env.conversation_id),
+        ],
+        check=True,
+        timeout=10,
+    )
+    assert env.messages()[1].status == "in_progress"
+    assert env.messages()[1].content == "durable prefix"
+    env.expire_active()
+    provider = FakeProvider(GenerationResult("Fresh reply"))
+    env.send(provider, "New question")
+    assert env.messages()[1].status == "failed"
+    assert env.messages()[1].content == "durable prefix"
+    assert [m.content for m in provider.requests[0].messages[2:]] == ["New question"]

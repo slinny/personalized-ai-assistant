@@ -276,3 +276,73 @@ docker stop assistant-task7-test
 Operational change: existing deployments need a matching `CONTEXT_MODEL_BUDGETS`
 entry for every selected model. See [Task 7](docs/task-7.md) and the README for the
 configuration contract and estimator limitations.
+
+## Task 8 streaming and lifecycle (2026-09-08)
+
+Implemented the seven execution checkpoints with a separate tested commit for
+contracts, lifecycle operations, async provider streaming, SSE transport,
+cancellation, failure recovery, and final validation/documentation. The execution
+plan file was deleted after implementation as requested. The README retains the
+public API, client examples, settings, and operational limitations.
+
+Checkpoint evidence:
+
+| Checkpoint | Validation before commit |
+| --- | --- |
+| Event contracts and limits | 5 contract/configuration tests; Ruff and mypy |
+| Shared lifecycle operations | 23 existing pipeline tests and 2 new PostgreSQL lifecycle/race tests; Ruff and mypy |
+| Async provider | 34 provider/adapter/evaluation tests; Ruff and mypy |
+| SSE endpoint | 3 PostgreSQL/HTTP tests, including real incremental delivery and keepalives; Ruff and mypy |
+| Cancellation | 8 lifecycle/stream tests, including separate app instances and real socket disconnect; Ruff and mypy |
+| Failure recovery | 11 failure/timeout/recovery tests; Ruff and mypy; 17 combined stream/lifecycle cases before the final lease additions |
+| Final review and documentation | Full local and container suites plus browser parser tests and static checks below |
+
+Final evidence:
+
+- Local Python 3.13.1: **257 passed, no skips**, against disposable PostgreSQL 17
+  in `assistant-task8-test`, database `assistant_task8_test`, loopback port 55432.
+- Built `assistant-task8-validation`, Python 3.12.14: **257 passed, no skips**,
+  against that same disposable database after the host suite finished.
+- Ruff lint/format, strict mypy (65 source files), and dependency checks passed
+  on both runtimes. `git diff --check` and `docker compose config --quiet` passed.
+- Browser example parser: **4 Node tests passed**, including one-byte network
+  chunks splitting Unicode, comment keepalives, authoritative terminal text,
+  missing terminal events, unknown outcomes, and sequence rejection.
+- Alembic retained the single head `3f403ab7f7d7`. Offline upgrade SQL generated;
+  migration round trips and schema-drift checks passed in the integration suite.
+  No schema migration was needed; AnyIO is now an explicit dependency.
+- Offline evaluation comparison: 36 results, 0 provider errors, 5 expected
+  objective failures on fake text, 31 pending human review. Exit code 1 is
+  expected; temporary artifacts were written to `/tmp/assistant-task8-evaluation`.
+- No paid or live provider calls were made. Both sync and async HTTPX transports
+  are blocked in automated tests. Real transport tests use loopback HTTP with
+  fake generation, while adapter tests mock the installed OpenAI SDK 2.54.0.
+
+Review fixed the expired-JSON-failure path to preserve HTTP 409, validated that
+SSE event payloads match their event/state, bounded upstream cleanup waits, and
+made blocked queue delivery respect the overall generation deadline. Coverage
+includes terminal races, foreign ownership, failed/cancelled history exclusion,
+partial output and output caps, blank/incomplete output, idle/overall timeouts,
+lease renewal/expiry, persistence outage with unknown outcome, slow ASGI sends,
+content-free metrics, and SDK/client cleanup. A subprocess commits a partial
+checkpoint then exits abruptly; recovery retains that prefix and excludes the
+interrupted turn from subsequent context after simulated lease expiry.
+
+Two pre-existing Starlette/AnyIO deprecation warnings remain. Reverse-proxy
+buffering, live model behavior, and the full Compose stack were not exercised.
+Cancellation/persistence latency depends on database responsiveness; JSON upstream
+calls remain synchronous. The README documents these limits, lazy recovery, and
+lack of replay/idempotent retries.
+
+Reproduction while the disposable database is running:
+
+```sh
+TEST_DATABASE_URL=postgresql+psycopg://postgres:task8-local@127.0.0.1:55432/assistant_task8_test \
+  .venv/bin/pytest -q
+node --test examples/stream-client.test.mjs
+docker build -t assistant-task8-validation .
+docker run --rm --network container:assistant-task8-test \
+  -e TEST_DATABASE_URL=postgresql+psycopg://postgres:task8-local@127.0.0.1:5432/assistant_task8_test \
+  assistant-task8-validation sh -c \
+  'python --version && pytest -q && ruff check . && ruff format --check . && mypy && pip check'
+```

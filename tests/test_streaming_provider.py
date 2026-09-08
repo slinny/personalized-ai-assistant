@@ -99,3 +99,36 @@ def test_stream_timeout_is_sanitized() -> None:
                 pass
 
     asyncio.run(run())
+
+
+def test_async_client_configuration_and_cleanup(monkeypatch: pytest.MonkeyPatch) -> None:
+    from fastapi.testclient import TestClient
+
+    from app.main import create_app
+
+    client = Mock(spec=AsyncOpenAI)
+    client.close = AsyncMock()
+    factory = Mock(return_value=client)
+    monkeypatch.setattr("app.main.AsyncOpenAI", factory)
+    monkeypatch.setenv("OPENAI_API_KEY", "test-only-key")
+    monkeypatch.setenv("OPENAI_TIMEOUT_SECONDS", "12")
+    with TestClient(create_app()):
+        factory.assert_called_once_with(api_key="test-only-key", timeout=12, max_retries=0)
+        client.close.assert_not_awaited()
+    client.close.assert_awaited_once()
+
+
+def test_early_stream_close_releases_sdk_context() -> None:
+    sdk = SDKStream([SimpleNamespace(type="response.output_text.delta", delta="partial")])
+    client = Mock(spec=AsyncOpenAI)
+    client.responses = SimpleNamespace(create=AsyncMock(return_value=sdk))
+
+    async def run() -> None:
+        from contextlib import aclosing
+
+        iterator = OpenAIStreamingProvider(client).stream(GenerationRequest("model", (), 123))
+        async with aclosing(iterator):
+            assert await anext(iterator) == TextDelta("partial")
+
+    asyncio.run(run())
+    assert sdk.closed

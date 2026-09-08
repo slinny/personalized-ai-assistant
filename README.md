@@ -1,10 +1,10 @@
 # Personalized AI Assistant
 
-Tasks 1–7: Python 3.12+, FastAPI, Pydantic settings, SQLAlchemy/PostgreSQL,
+Tasks 1–8: Python 3.12+, FastAPI, Pydantic settings, SQLAlchemy/PostgreSQL,
 User/AssistantProfile/Conversation/Message models, Alembic migrations, pytest,
 single-user bearer authentication, assistant settings, deterministic behavior compilation,
 non-streaming OpenAI conversation/message APIs, behavioral evaluations,
-model-specific context budgets, and local Docker development.
+model-specific context budgets, SSE streaming and cancellation, and local Docker development.
 
 ## Local Python
 
@@ -275,3 +275,138 @@ Live evaluations use the same budget resolution. Offline smoke runs use a fixed
 synthetic 32768-token capacity with a 2048-token output reserve and 1024-token
 margin, independent of live settings. JSON reports include budget diagnostics.
 See [Task 7](docs/task-7.md) for estimation limits, logging, and validation details.
+
+
+## Streaming and cancellation (Task 8)
+
+The existing JSON send endpoint still returns HTTP 201 with a complete turn.
+For incremental delivery, POST the same body to the authenticated streaming endpoint:
+
+```sh
+curl -N --fail-with-body -X POST \
+  "http://localhost:8000/conversations/$CONVERSATION_ID/messages/stream" \
+  -H "Authorization: Bearer $AUTH_TOKEN" -H 'Content-Type: application/json' \
+  -d '{"content":"Explain how streaming works."}'
+```
+
+Setup validates ownership, input, provider/model configuration, context budget,
+and the active-turn lock before returning HTTP 200 `text/event-stream`.
+Setup failures retain the JSON API's 401/404/409/422/503 semantics and do not
+create a new turn. After headers, failures are reported through SSE; a successful
+HTTP status alone does not mean generation succeeded.
+
+Each JSON event has `event`, `message_id`, `sequence`, and `payload`. Sequence
+numbers begin at 1 and increase within this connection. They are not replay IDs;
+reconnection and `Last-Event-ID` replay are not supported. SSE comments keep an
+idle connection alive.
+
+| Event | Payload and client action |
+| --- | --- |
+| `turn.started` | Saved `user_message` and `assistant_message`; remember the assistant ID |
+| `message.delta` | Append `text` to provisional displayed content |
+| `message.completed` | Replace displayed text with the saved `message` |
+| `message.cancelled` | Replace displayed text with the saved `message`; generation stopped |
+| `message.failed` | Saved partial `message` and safe `error_code`; generation failed |
+| `stream.error` | `code: outcome_unknown`; fetch history to determine the durable outcome |
+
+Failure codes are `generation_failed`, `generation_timeout`, `output_limit`, and
+`lease_expired`. They are event diagnostics, not persisted message fields. A
+normal connected stream ends after one terminal message event. EOF without a
+terminal event is an unknown outcome. Fetch history before resending: repeated
+POSTs create new turns, and there are no automatic retries.
+
+Use the tested [browser client example](examples/stream-client.mjs) with `fetch`
+and a bearer header. It parses frames and UTF-8 across arbitrary network chunk
+boundaries, ignores keepalives, and returns the authoritative terminal message:
+
+```js
+import { streamTurn, cancelTurn } from "./examples/stream-client.mjs";
+
+let messageId;
+const saved = await streamTurn({
+  conversationId, token, content: "Hello",
+  onEvent(event) {
+    if (event.event === "turn.started") messageId = event.message_id;
+    // Render message.delta provisionally; use the returned saved content at the end.
+  },
+});
+// A separate Stop button can call this while streamTurn is still pending:
+// await cancelTurn({ conversationId, messageId, token });
+```
+
+Serve the example from the same origin as the API, or configure cross-origin
+access separately. No browser UI or CORS policy is added by Task 8. A caller may
+also pass an AbortSignal; aborting or losing the connection triggers server-side
+cancellation. Catch client errors and reconcile with saved message history.
+Run the example's parser tests with `node --test examples/stream-client.test.mjs`.
+
+To cancel explicitly after receiving the assistant ID:
+
+```sh
+ASSISTANT_MESSAGE_ID=replace-with-id-from-turn.started
+curl --fail-with-body -X POST \
+  "http://localhost:8000/conversations/$CONVERSATION_ID/messages/$ASSISTANT_MESSAGE_ID/cancel" \
+  -H "Authorization: Bearer $AUTH_TOKEN"
+```
+
+Cancellation returns the saved message. Repeated cancellation of any terminal
+assistant message returns its unchanged state. Missing/foreign resources return
+404; targeting a user message returns 409. The first committed terminal transition
+wins: completion already committed remains completed. Cancellation is stored in
+PostgreSQL and observed across workers without shared process memory.
+
+User messages remain completed; assistants transition from `in_progress` to
+`completed`, `cancelled`, or `failed`. Streaming saves partial text periodically
+and on terminal transitions. Explicit cancellation preserves the latest durable
+prefix, which can be shorter than provisional text already displayed. No late
+worker may append to a terminal message. Failed and cancelled turns are excluded
+from future context. The JSON endpoint retains empty content on provider failure;
+cancellation prevents its late result from being saved, returning 409 when it
+wins, but its synchronous upstream call is not interrupted immediately.
+
+### Streaming settings and recovery
+
+| Environment setting | Default | Purpose |
+| --- | --- | --- |
+| `STREAM_DEADLINE_SECONDS` | 120 | Overall generation deadline, independent of incoming deltas |
+| `STREAM_IDLE_SECONDS` | 30 | Maximum wait without a text/completion event, including the first token |
+| `STREAM_HEARTBEAT_SECONDS` | 10 | SSE keepalive interval |
+| `STREAM_POLL_SECONDS` | 0.5 | Database cancellation checks and lease heartbeats |
+| `STREAM_CHECKPOINT_SECONDS` | 1 | Partial text save cadence, checked during polling |
+| `STREAM_SEND_TIMEOUT_SECONDS` | 10 | Maximum blocked queue/ASGI send time and upstream cleanup wait |
+| `STREAM_MAX_OUTPUT_BYTES` | 262144 | UTF-8 output cap, in addition to the model token allowance |
+
+Polling and checkpoint intervals must each be less than one third of
+`GENERATION_LEASE_SECONDS`. All intervals are positive and finite. Restart after
+changing settings. The upstream SDK also retains `OPENAI_TIMEOUT_SECONDS` and
+zero retries. There is one queued frame per stream and bounded accumulated text;
+a blocked consumer is cancelled after the send timeout. Generation deadlines do
+not include the time needed to persist the outcome or clean up resources.
+
+Normally cancellation is observed at the next poll plus database time. A blocked
+send can add up to the send timeout; closing upstream can take a further cleanup
+interval. Database availability and responsive database locks are required for
+prompt persistence. No transaction or row lock is held during provider/network
+waits, and each streaming DB operation owns its session within a worker thread.
+
+`updated_at` continues to serve as the assistant's lease heartbeat, so it can
+change without new content. If a process dies or persistence fails, a subsequent
+valid send recovers the expired lease as failed and retains its last checkpoint.
+GET can show `in_progress` until recovery occurs. There is no sweeper, replay log,
+or background generation job, and uncheckpointed text may be lost on a crash.
+
+Responses disable caching and request proxy buffering be disabled. Configure the
+actual reverse proxy to stream without buffering or compression-induced delays,
+and set its idle timeout above the heartbeat interval. The server header alone
+does not configure every proxy.
+
+INFO logs expose content-free `stream_metrics` (outcome, duration, time to first
+delta, and observed cancellation age). The age uses the database timestamp and
+application clock; it is approximate. Context logs also include a recovered-turn
+count. No prompts, generated text, credentials, or upstream diagnostics are logged.
+
+The adapter consumes typed text and completion events as described in the
+[official OpenAI streaming guide](https://developers.openai.com/api/docs/guides/streaming-responses),
+checked alongside installed SDK 2.54.0. EOF, incomplete responses, and blank
+output are failures. Automated validation uses fakes/mocked SDKs, including real
+loopback HTTP transport tests; no paid provider calls are required.

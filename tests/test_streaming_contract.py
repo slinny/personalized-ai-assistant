@@ -30,3 +30,10 @@ def test_sse_serialization_does_not_inject_frames() -> None:
 def test_stream_limits(values: dict[str, object]) -> None:
     with pytest.raises(ValidationError):
         Settings.model_validate(values)
+
+
+def test_event_rejects_wrong_payload() -> None:
+    from app.schemas.streaming import StreamError
+
+    with pytest.raises(ValidationError, match="Event and payload"):
+        StreamEvent(event="message.delta", message_id=uuid4(), sequence=1, payload=StreamError())

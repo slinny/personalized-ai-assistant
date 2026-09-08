@@ -1,4 +1,4 @@
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator
 
 from openai import APIError, APITimeoutError, AsyncOpenAI, OpenAI
 from openai.types.responses import ResponseInputParam
@@ -45,7 +45,7 @@ class OpenAIStreamingProvider:
 
     async def stream(
         self, request: GenerationRequest
-    ) -> AsyncIterator[TextDelta | StreamCompleted]:
+    ) -> AsyncGenerator[TextDelta | StreamCompleted, None]:
         messages: ResponseInputParam = [
             {"role": message.role, "content": message.content} for message in request.messages
         ]

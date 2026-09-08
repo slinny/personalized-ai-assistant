@@ -130,6 +130,7 @@ def update_turn(
     *,
     status: Literal["in_progress", "completed", "failed", "cancelled"],
     content: str | None = None,
+    require_active: bool = False,
 ) -> MessageResponse:
     """Atomically checkpoint or finalize; terminal states never change.
 
@@ -149,9 +150,18 @@ def update_turn(
             raise ConversationError(409, "Only assistant messages can be cancelled")
         now = session.scalar(select(func.clock_timestamp()))
         assert now is not None
+        if require_active and saved.status != "in_progress":
+            raise ConversationError(
+                409, "Generation cancelled" if saved.status == "cancelled" else "Generation expired"
+            )
         if saved.status == "in_progress":
             if saved.updated_at + timedelta(seconds=settings.generation_lease_seconds) <= now:
                 saved.status = "failed"
+                if require_active:
+                    saved.updated_at = now
+                    conversation.updated_at = now
+                    session.commit()
+                    raise ConversationError(409, "Generation expired")
             else:
                 if status == "completed" and (content is None or not content.strip()):
                     raise ValueError("Completion requires nonblank text")
@@ -199,13 +209,8 @@ def send_message(
         settings,
         status="failed" if failure else "completed",
         content="" if failure else text,
+        require_active=True,
     )
-    if assistant.status == "cancelled":
-        raise ConversationError(409, "Generation cancelled")
-    if assistant.status != ("failed" if failure else "completed") or (
-        failure is None and assistant.content != text
-    ):
-        raise ConversationError(409, "Generation expired")
     if failure is not None:
         raise failure
     return TurnResponse(user_message=reserved.user_message, assistant_message=assistant)

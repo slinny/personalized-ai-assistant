@@ -141,7 +141,8 @@ class TurnStream(Response):
             if next_event is not None:
                 next_event.cancel()
                 with suppress(asyncio.CancelledError, Exception):
-                    await next_event
+                    with anyio.fail_after(self.settings.stream_send_timeout_seconds):
+                        await next_event
                 next_event = None
             close = getattr(iterator, "aclose", None)
             if close is not None:
@@ -149,9 +150,22 @@ class TurnStream(Response):
                     with anyio.fail_after(self.settings.stream_send_timeout_seconds):
                         await close()
 
-        async def emit(frame: bytes) -> None:
-            with anyio.fail_after(self.settings.stream_send_timeout_seconds):
-                await outgoing.send(frame)
+        async def emit(frame: bytes, *, terminal: bool = False) -> None:
+            remaining = self.settings.stream_deadline_seconds - (monotonic() - self.started_at)
+            deadline_limited = (
+                not terminal and remaining <= self.settings.stream_send_timeout_seconds
+            )
+            try:
+                with anyio.fail_after(
+                    max(0, remaining)
+                    if deadline_limited
+                    else self.settings.stream_send_timeout_seconds
+                ):
+                    await outgoing.send(frame)
+            except TimeoutError:
+                if deadline_limited:
+                    raise ProviderTimeout("Generation timed out") from None
+                raise
 
         async def deliver() -> None:
             try:
@@ -179,7 +193,8 @@ class TurnStream(Response):
         async def generate() -> None:
             nonlocal next_event, iterator
             loop = asyncio.get_running_loop()
-            start = last_activity = last_save = last_poll = last_heartbeat = loop.time()
+            start = self.started_at
+            last_activity = last_save = last_poll = last_heartbeat = start
             size = 0
             try:
                 await emit(
@@ -208,7 +223,7 @@ class TurnStream(Response):
                             last_save = now
                         if saved.status != "in_progress":
                             await stop_upstream()
-                            await emit(self.terminal_event(saved))
+                            await emit(self.terminal_event(saved), terminal=True)
                             break
                     if now - last_heartbeat >= self.settings.stream_heartbeat_seconds:
                         await emit(b": keepalive\n\n")
@@ -235,7 +250,7 @@ class TurnStream(Response):
                             raise ProviderError("Generation returned no text")
                         await stop_upstream()
                         saved = await self.save("completed", self.text)
-                        await emit(self.terminal_event(saved))
+                        await emit(self.terminal_event(saved), terminal=True)
                         break
                     size += len(event.text.encode("utf-8"))
                     if size > self.settings.stream_max_output_bytes:
@@ -262,9 +277,9 @@ class TurnStream(Response):
                 )
                 try:
                     saved = await self.save("failed", self.text)
-                    await emit(self.terminal_event(saved, code))
+                    await emit(self.terminal_event(saved, code), terminal=True)
                 except Exception:
-                    await emit(self.event("stream.error", StreamError()))
+                    await emit(self.event("stream.error", StreamError()), terminal=True)
             finally:
                 await outgoing.aclose()
 

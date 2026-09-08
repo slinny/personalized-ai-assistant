@@ -98,3 +98,13 @@ Checkpoint validation before commits:
 - Lifecycle: 2 PostgreSQL API/lifecycle tests; Ruff and mypy passed.
 - Expanded automated tests: full PostgreSQL suite, 153 passed; Ruff and mypy passed.
 - Final documentation/runtime validation: see VALIDATION.md for verified results.
+
+
+## Task 8 integration note
+
+Task 8 adds an authenticated SSE send endpoint and database-backed cancellation.
+The JSON API retains its response/error contract, including 409 for expired or
+cancelled generations. Shared lifecycle operations now enforce immutable terminal
+states. Streaming renews leases and checkpoints partial text; failed/cancelled
+streaming messages can contain text but remain excluded from context. See the
+README's streaming section for the current protocol and recovery behavior.

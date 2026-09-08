@@ -90,3 +90,17 @@ def test_json_generation_cannot_overwrite_cancellation(env: Environment) -> None
         env.send(Cancelling())
     assert env.messages()[1].status == "cancelled"
     assert env.messages()[1].content == ""
+
+
+def test_expired_json_failure_still_returns_conflict(env: Environment) -> None:  # noqa: F811
+    from app.providers import GenerationRequest, GenerationResult, ProviderError
+    from app.providers.fake import FakeProvider
+
+    class ExpiringFailure(FakeProvider):
+        def generate(self, request: GenerationRequest) -> GenerationResult:
+            env.expire_active()
+            raise ProviderError("failed late")
+
+    with pytest.raises(ConversationError, match="expired"):
+        env.send(ExpiringFailure())
+    assert env.messages()[1].status == "failed"
