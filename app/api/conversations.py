@@ -22,7 +22,7 @@ from app.schemas.conversation import (
     TurnResponse,
 )
 from app.services.budget import ContextOverflow
-from app.services.conversation import ConversationError, reserve_turn, send_message
+from app.services.conversation import ConversationError, reserve_turn, send_message, update_turn
 from app.services.streaming import TurnStream
 
 router = APIRouter(prefix="/conversations", tags=["conversations"])
@@ -142,3 +142,24 @@ def stream_message(
     return TurnStream(
         turn, user_id, request.app.state.session_factory, provider, request.app.state.settings
     )
+
+
+@router.post("/{conversation_id}/messages/{message_id}/cancel", response_model=MessageResponse)
+def cancel_message(
+    conversation_id: UUID,
+    message_id: UUID,
+    user_id: UserId,
+    session: Database,
+    request: Request,
+) -> MessageResponse:
+    try:
+        return update_turn(
+            session,
+            user_id,
+            conversation_id,
+            message_id,
+            request.app.state.settings,
+            status="cancelled",
+        )
+    except ConversationError as error:
+        raise HTTPException(error.status_code, error.detail) from None

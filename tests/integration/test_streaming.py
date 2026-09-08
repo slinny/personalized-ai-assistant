@@ -1,4 +1,5 @@
 import json
+from uuid import uuid4
 
 from fastapi.testclient import TestClient
 
@@ -101,3 +102,94 @@ def test_real_http_delivers_delta_and_keepalive_before_completion(env: Environme
     finally:
         release.set()
     assert provider.closed and env.messages()[1].status == "completed"
+
+
+def test_cancel_from_separate_app_stops_stalled_stream(env: Environment) -> None:  # noqa: F811
+    import asyncio
+    from collections.abc import AsyncIterator
+    from threading import Event
+
+    from app.providers import GenerationRequest
+    from tests.integration.stream_server import serve
+
+    closed = Event()
+
+    class Stalled(FakeStreamingProvider):
+        async def stream(
+            self, request: GenerationRequest
+        ) -> AsyncIterator[TextDelta | StreamCompleted]:
+            try:
+                yield TextDelta("provisional")
+                await asyncio.Event().wait()
+            finally:
+                closed.set()
+
+    app = create_app()
+    app.state.settings.stream_poll_seconds = 0.02
+    app.dependency_overrides[get_streaming_provider] = lambda: Stalled()
+    headers = {"Authorization": "Bearer " + "a" * 32, "Content-Type": "application/json"}
+    other_app = create_app()
+    with serve(app) as connection, TestClient(other_app) as other_worker:
+        path = f"/conversations/{env.conversation_id}/messages"
+        connection.request("POST", path + "/stream", json.dumps({"content": "Hi"}), headers)
+        response = connection.getresponse()
+        observed = b""
+        while b'"text":"provisional"' not in observed:
+            observed += response.readline()
+        message = env.messages()[1]
+        cancel = path + f"/{message.id}/cancel"
+        cancelled = other_worker.post(cancel, headers=headers)
+        assert cancelled.status_code == 200 and cancelled.json()["status"] == "cancelled"
+        assert other_worker.post(cancel, headers=headers).json() == cancelled.json()
+        tail = response.read()
+        assert b"message.cancelled" in tail and b"message.completed" not in tail
+        assert closed.wait(2)
+        assert env.messages()[1].content == cancelled.json()["content"]
+        assert (
+            other_worker.post(path + f"/{env.messages()[0].id}/cancel", headers=headers).status_code
+            == 409
+        )
+        other_app.state.settings.auth_user_id = uuid4()
+        assert other_worker.post(cancel, headers=headers).status_code == 404
+
+
+def test_real_disconnect_before_first_token_cancels(env: Environment) -> None:  # noqa: F811
+    import asyncio
+    from collections.abc import AsyncIterator
+    from threading import Event
+    from time import monotonic, sleep
+
+    from app.providers import GenerationRequest
+    from tests.integration.stream_server import serve
+
+    entered, closed = Event(), Event()
+
+    class Silent(FakeStreamingProvider):
+        async def stream(
+            self, request: GenerationRequest
+        ) -> AsyncIterator[TextDelta | StreamCompleted]:
+            try:
+                entered.set()
+                await asyncio.Event().wait()
+                yield StreamCompleted()
+            finally:
+                closed.set()
+
+    app = create_app()
+    app.dependency_overrides[get_streaming_provider] = lambda: Silent()
+    with serve(app) as connection:
+        connection.request(
+            "POST",
+            f"/conversations/{env.conversation_id}/messages/stream",
+            json.dumps({"content": "Hi"}),
+            {"Authorization": "Bearer " + "a" * 32, "Content-Type": "application/json"},
+        )
+        response = connection.getresponse()
+        assert response.status == 200 and entered.wait(2)
+        response.close()
+        connection.close()
+        assert closed.wait(2)
+        deadline = monotonic() + 2
+        while env.messages()[1].status == "in_progress" and monotonic() < deadline:
+            sleep(0.01)
+        assert env.messages()[1].status == "cancelled"

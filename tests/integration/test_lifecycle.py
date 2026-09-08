@@ -66,3 +66,27 @@ def test_checkpoint_expiry_and_ownership(env: Environment) -> None:  # noqa: F81
             content="late",
         )
     assert late.status == "failed" and late.content == "partial"
+
+
+def test_json_generation_cannot_overwrite_cancellation(env: Environment) -> None:  # noqa: F811
+    from app.providers import GenerationRequest, GenerationResult
+    from app.providers.fake import FakeProvider
+
+    class Cancelling(FakeProvider):
+        def generate(self, request: GenerationRequest) -> GenerationResult:
+            message = env.messages()[1]
+            with Session(env.engine) as session:
+                update_turn(
+                    session,
+                    env.user_id,
+                    env.conversation_id,
+                    message.id,
+                    env.settings,
+                    status="cancelled",
+                )
+            return GenerationResult("late")
+
+    with pytest.raises(ConversationError, match="cancelled"):
+        env.send(Cancelling())
+    assert env.messages()[1].status == "cancelled"
+    assert env.messages()[1].content == ""
