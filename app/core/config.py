@@ -87,3 +87,20 @@ class Settings(BaseSettings):
         if value.scheme != "postgresql+psycopg":
             raise ValueError("DATABASE_URL must use postgresql+psycopg://")
         return value
+
+    stream_deadline_seconds: float = Field(default=120, gt=0, le=3600, allow_inf_nan=False)
+    stream_idle_seconds: float = Field(default=30, gt=0, le=120, allow_inf_nan=False)
+    stream_heartbeat_seconds: float = Field(default=10, gt=0, le=60, allow_inf_nan=False)
+    stream_poll_seconds: float = Field(default=0.5, gt=0, le=5, allow_inf_nan=False)
+    stream_checkpoint_seconds: float = Field(default=1, gt=0, le=30, allow_inf_nan=False)
+    stream_send_timeout_seconds: float = Field(default=10, gt=0, le=60, allow_inf_nan=False)
+    stream_max_output_bytes: int = Field(default=262144, ge=1, le=1048576)
+
+    @model_validator(mode="after")
+    def validate_stream_intervals(self) -> Self:
+        if (
+            max(self.stream_poll_seconds, self.stream_checkpoint_seconds) * 3
+            >= self.generation_lease_seconds
+        ):
+            raise ValueError("Streaming poll/checkpoint intervals must be below one third of lease")
+        return self
