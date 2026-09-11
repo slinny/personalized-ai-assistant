@@ -112,3 +112,11 @@ these live comparisons are reviewed.
 
 The release is complete when the assistant looks the way you chose, communicates
 the way you prefer, and remembers only the notes you deliberately saved.
+
+## Implementation status
+
+The three first-release deliverables are implemented and committed: personal UI,
+validated AI theme previews with persistence, and explicit editable memory.
+Backend, migration, and browser validation are recorded in `VALIDATION.md`.
+The one-week personal trial and the daily-routine follow-up remain future work;
+this implementation does not introduce reminders, weather, or scheduled delivery.

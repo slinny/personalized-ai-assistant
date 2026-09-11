@@ -115,7 +115,7 @@ function renderProfile(profile) {
 }
 $('connection').onsubmit = event => { event.preventDefault(); action(async () => {
   token = $('token').value.trim();
-  try { renderProfile(await api('/assistant')); activeTheme = await api('/assistant/theme'); draftTheme = { ...activeTheme }; applyTheme(document.documentElement, activeTheme); renderTheme(); await loadNotes(); await list(true); $('token').value = ''; notice('Connected. Select a conversation or create one.'); }
+  try { renderProfile(await api('/assistant')); activeTheme = await api('/assistant/theme'); draftTheme = { ...activeTheme }; applyTheme(document.documentElement, activeTheme); renderTheme(); await loadNotes(); await list(true); $('token').value = ''; document.querySelector('.connection-panel').open = false; notice('Connected. Select a conversation or create one.'); }
   catch (error) { token = ''; throw error; }
 }); };
 $('disconnect').onclick = () => {
@@ -210,7 +210,7 @@ $('preset').onchange = () => {
 for (const [id, prompt] of [['shorter', 'Please make your last answer shorter.'], ['detail', 'Please explain your last answer in more detail.']]) {
   $(id).onclick = () => { $('content').value = prompt; $('content').focus(); };
 }
-$('settings-open').onclick = () => $('settings-dialog').showModal();
+$('settings-open').onclick = () => { $('settings-dialog').showModal(); $('settings-dialog').scrollTop = 0; };
 $('settings-close').onclick = () => $('settings-dialog').close();
 renderTheme();
 

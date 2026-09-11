@@ -482,3 +482,19 @@ conversations. They cannot change an in-flight request, remove original messages
 from chat history, or undo information already sent to the model provider.
 The model receives notes as quoted user context, with explicit precedence for
 platform rules, current requests, and communication settings.
+
+### Browser regression checks
+
+With the disposable `TEST_DATABASE_URL` configured as described above, run
+`.venv/bin/python -m tests.ui_server` in one terminal. This test-only server uses
+synthetic responses and a fixed test identity on `127.0.0.1:8011`; do not run it
+against your development data or use it as your actual assistant.
+
+In another terminal, run `node tests/ui.e2e.cjs` with Playwright resolvable by Node
+and Google Chrome installed. If using a bundled Playwright installation, point
+`NODE_PATH` at its `node_modules` directory. Screenshots go to
+`/tmp/assistant-ui-validation` (override with `UI_TEST_OUTPUT`). The test verifies
+the fixture identity before changing data. Stop the fixture server afterwards.
+
+The first release is implemented. In-app reminders and an agenda/weather Today
+card remain the separate follow-up milestone in the personalization plan.

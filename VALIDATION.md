@@ -398,3 +398,24 @@ docker run --rm --network container:assistant-task8-test \
   All 5 Node tests, Ruff, formatting, mypy, and JS syntax checks passed.
 - Updated evaluation diagnostic typing for memory ID tuples; no new serializer
   warnings remain. Model behavior was tested with fake providers, not live calls.
+
+## Final browser validation — first personalization release
+
+- Added a repeatable Chrome/Playwright flow and an explicitly opt-in fake-provider
+  server that rejects databases not ending in `_test` and ignores the local `.env`.
+- Browser checks passed: curated and generated previews, Apply, persistence after
+  reload, invalid generation preserving saved appearance, Reset, communication
+  saving and live-sample plumbing, reviewed memory creation, edit/delete, streaming,
+  cancellation, response refinement, Escape/focus return, and disconnect cleanup.
+- Inspected desktop and mobile screenshots. Fixed header overflow at 200% text
+  size, kept the settings heading available while scrolling, and collapsed the
+  connection panel after connecting. Both chat and settings pass horizontal
+  overflow checks at 390px width with normal and 200% text sizing.
+- Final checks: 279 Python tests passed in the full PostgreSQL suite; 5 Node tests
+  passed; Chrome workflow passed; Ruff lint/format, mypy (76 files), JavaScript
+  syntax, migration SQL generation, and git whitespace checks passed.
+- Two existing dependency deprecation warnings remain. No live paid model calls
+  were made: generated-theme quality and subjective communication quality still
+  need evaluation with the chosen model during the planned personal trial.
+- Temporary test server and disposable database are stopped after validation.
+  Existing development data was not migrated or changed by this work.
