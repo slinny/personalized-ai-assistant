@@ -8,12 +8,13 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings
-from app.models import AssistantProfile, Conversation, Message
+from app.models import AssistantProfile, Conversation, MemoryNote, Message
 from app.providers import GenerationProvider, GenerationRequest, ProviderError, ProviderUnavailable
 from app.schemas.conversation import MessageResponse, TurnResponse
 from app.services.budget import resolve_budget
 from app.services.context import build_context
 from app.services.history import iter_history
+from app.services.memory import Note
 
 logger = logging.getLogger(__name__)
 
@@ -77,6 +78,15 @@ def reserve_turn(
             content,
             model,
             budget,
+            notes=(
+                Note(str(note.id), note.content)
+                for note in session.scalars(
+                    select(MemoryNote)
+                    .where(MemoryNote.user_id == user_id)
+                    .order_by(MemoryNote.updated_at.desc(), MemoryNote.id.desc())
+                    .limit(20)
+                )
+            ),
         )
         position = (
             session.scalar(
@@ -213,4 +223,10 @@ def send_message(
     )
     if failure is not None:
         raise failure
-    return TurnResponse(user_message=reserved.user_message, assistant_message=assistant)
+    return TurnResponse(
+        user_message=reserved.user_message,
+        assistant_message=assistant,
+        omitted_memory_ids=list(reserved.request.context.omitted_memory_ids)
+        if reserved.request.context
+        else [],
+    )

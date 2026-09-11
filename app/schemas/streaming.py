@@ -14,6 +14,7 @@ class Started(BaseModel):
     model_config = ConfigDict(extra="forbid")
     user_message: MessageResponse
     assistant_message: MessageResponse
+    omitted_memory_ids: list[str] = Field(default_factory=list)
 
 
 class Delta(BaseModel):

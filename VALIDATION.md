@@ -385,3 +385,16 @@ docker run --rm --network container:assistant-task8-test \
   persistence/isolation, failed previews, theme contrast, and schema drift checks.
   Ruff, mypy, JS syntax and all 5 Node tests passed. Provider calls used fakes;
   actual model theme quality is not established by these automated checks.
+
+## Personalization step 3 — explicit, bounded memory
+
+- Added migration `9a02`, owned note CRUD, user-message source validation, a
+  serialized 20-note limit, and a reviewed “Remember this” flow in `/ui/`.
+- Both generation paths select whole notes within a fixed bounded allocation.
+  Omission IDs are exposed in JSON and SSE and shown in the interface.
+- Validation: 279 Python tests passed against disposable PostgreSQL, including
+  cross-conversation recall inputs, correction/deletion, ownership, concurrent
+  cap enforcement, streaming omission reports, migration round-trip and drift.
+  All 5 Node tests, Ruff, formatting, mypy, and JS syntax checks passed.
+- Updated evaluation diagnostic typing for memory ID tuples; no new serializer
+  warnings remain. Model behavior was tested with fake providers, not live calls.

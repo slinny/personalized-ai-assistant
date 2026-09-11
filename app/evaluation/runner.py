@@ -14,7 +14,7 @@ from app.services.context import HistoryMessage, build_context
 class TurnResult(BaseModel):
     request: list[dict[str, str]]
     max_output_tokens: int | None = None
-    context: dict[str, str | int | bool] | None = None
+    context: dict[str, str | int | bool | tuple[str, ...]] | None = None
     response: str | None = None
     error: str | None = None
 

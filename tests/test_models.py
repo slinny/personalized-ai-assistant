@@ -6,7 +6,13 @@ from app.models import Base
 
 def test_postgresql_schema_contract() -> None:
     tables = Base.metadata.tables
-    assert set(tables) == {"users", "assistant_profiles", "conversations", "messages"}
+    assert set(tables) == {
+        "users",
+        "assistant_profiles",
+        "conversations",
+        "messages",
+        "memory_notes",
+    }
     dialect = PGDialect_psycopg()  # type: ignore[no-untyped-call]
     ddl = "\n".join(str(CreateTable(t).compile(dialect=dialect)) for t in tables.values())
     assert "FOREIGN KEY(assistant_profile_id, user_id)" in ddl

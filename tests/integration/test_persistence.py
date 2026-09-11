@@ -185,6 +185,7 @@ def test_migration_cycle(engine: Engine) -> None:
         "assistant_profiles",
         "conversations",
         "messages",
+        "memory_notes",
     }
     command.check(config)
 

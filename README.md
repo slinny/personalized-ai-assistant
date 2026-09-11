@@ -462,3 +462,23 @@ The authenticated appearance API is `GET/PUT /assistant/theme`, with
 validated style tokens, with 4.5:1 text/accent contrast on both surfaces.
 `POST /assistant/preview` accepts `{ "changes": { "verbosity": 0.2 } }` and
 returns a live style sample without saving preferences or conversation messages.
+
+Memory is explicit: use “Remember this” on one of your own messages, review the
+text, then Save note. Personalize → Memory also supports adding, editing, and
+deleting notes directly. Up to 20 notes of 300 characters are allowed per user.
+Tone and language remain in Communication. No notes are extracted automatically.
+
+The authenticated API is `GET/POST /memories`, and `PATCH/DELETE /memories/{id}`.
+Creation accepts `content` and an optional `source_message_id` belonging to one
+of your user messages; editing accepts only `content`. Notes are ordered by latest
+update, then ID. Requests include whole notes within at most 1024 estimated tokens
+and at most one quarter of the input remaining after required instructions and
+the current message. Skipped IDs are returned as `omitted_memory_ids` in JSON
+turn results and streaming `turn.started`; the UI identifies skipped notes for
+the current request. The existing estimator counts UTF-8 bytes conservatively.
+
+Edits and deletion affect requests assembled afterwards, including new
+conversations. They cannot change an in-flight request, remove original messages
+from chat history, or undo information already sent to the model provider.
+The model receives notes as quoted user context, with explicit precedence for
+platform rules, current requests, and communication settings.

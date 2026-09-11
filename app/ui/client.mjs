@@ -2,6 +2,7 @@ import { streamTurn, cancelTurn } from '/test-client/stream-client.mjs';
 import { presets, examples, applyTheme, curatedThemes } from './personalization.mjs';
 const $ = id => document.getElementById(id);
 let activeTheme = { ...curatedThemes.clean }, draftTheme = { ...activeTheme };
+let notes = [], editingNoteId = null, sourceMessageId = null, omittedNotes = new Set();
 let token = '', conversationId = null, conversations = [], messages = [];
 let busy = false, streaming = false, assistantId = null, controller = null, uncertain = false;
 const fields = {
@@ -16,7 +17,7 @@ const sliders = ['warmth', 'verbosity', 'humor', 'formality'];
 function notice(text, error = false) { $('settings-notice').textContent = $('settings-dialog').open ? text : ''; $('notice').textContent = text; $('notice').className = error ? 'error' : ''; }
 function controls() {
   const locked = busy || streaming;
-  for (const id of ['new', 'more', 'save', 'profile-fields', 'disconnect', 'preset', 'shorter', 'detail', 'theme-apply', 'theme-reset', 'theme-generate', 'tone-live']) $(id).disabled = !token || locked;
+  for (const id of ['new', 'more', 'save', 'profile-fields', 'disconnect', 'preset', 'shorter', 'detail', 'theme-apply', 'theme-reset', 'theme-generate', 'tone-live', 'memory-save', 'memory-content', 'memory-cancel']) $(id).disabled = !token || locked;
   $('more').disabled ||= conversations.length % 50 !== 0;
   $('refresh').disabled = !conversationId || locked;
   $('send').disabled = $('content').disabled = !conversationId || locked || uncertain;
@@ -25,6 +26,7 @@ function controls() {
   $('token').disabled = locked || !!token;
   $('connection').querySelector('button').disabled = locked || !!token;
   for (const button of $('conversations').children) button.disabled = locked;
+  for (const button of document.querySelectorAll('[data-memory-action]')) button.disabled = !token || locked;
 }
 async function api(path, options = {}) {
   const response = await fetch(path, { ...options, headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' } });
@@ -48,7 +50,13 @@ function renderMessages() {
     const heading = document.createElement('strong'); heading.textContent = message.role === 'user' ? 'You' : ($('assistant-label').textContent || 'Assistant');
     const content = document.createElement('p'); content.textContent = message.content;
     const status = document.createElement('small'); status.textContent = message.status;
-    article.append(heading, content, status); $('messages').append(article);
+    article.append(heading, content, status);
+    if (message.role === 'user') {
+      const remember = document.createElement('button'); remember.textContent = 'Remember this'; remember.className = 'remember quiet'; remember.dataset.memoryAction = 'remember'; remember.disabled = busy || streaming;
+      remember.onclick = () => { editingNoteId = null; sourceMessageId = message.id; $('memory-content').value = message.content.slice(0, 300); $('memory-save').textContent = 'Save note'; $('memory-status').textContent = message.content.length > 300 ? 'Shorten or edit this excerpt to the exact note you want to save (300 characters max).' : 'Review this note, then save it to use across conversations.'; $('settings-dialog').showModal(); $('memory-section').scrollIntoView(); $('memory-content').focus(); };
+      article.append(remember);
+    }
+    $('messages').append(article);
   }
   $('messages').scrollTop = $('messages').scrollHeight;
 }
@@ -64,7 +72,7 @@ function renderConversations() {
     button.textContent = `${new Date(item.created_at).toLocaleString()} · ${item.id.slice(0, 8)}`;
     button.setAttribute('aria-current', String(item.id === conversationId));
     button.onclick = () => action(async () => {
-      conversationId = item.id; messages = []; uncertain = true; renderMessages(); renderConversations();
+      conversationId = item.id; omittedNotes.clear(); $('memory-context-status').textContent = ''; messages = []; uncertain = true; renderMessages(); renderConversations();
       $('chat-title').textContent = `Conversation · ${item.id.slice(0, 8)}`; await history();
     });
     $('conversations').append(button);
@@ -107,17 +115,18 @@ function renderProfile(profile) {
 }
 $('connection').onsubmit = event => { event.preventDefault(); action(async () => {
   token = $('token').value.trim();
-  try { renderProfile(await api('/assistant')); activeTheme = await api('/assistant/theme'); draftTheme = { ...activeTheme }; applyTheme(document.documentElement, activeTheme); renderTheme(); await list(true); $('token').value = ''; notice('Connected. Select a conversation or create one.'); }
+  try { renderProfile(await api('/assistant')); activeTheme = await api('/assistant/theme'); draftTheme = { ...activeTheme }; applyTheme(document.documentElement, activeTheme); renderTheme(); await loadNotes(); await list(true); $('token').value = ''; notice('Connected. Select a conversation or create one.'); }
   catch (error) { token = ''; throw error; }
 }); };
 $('disconnect').onclick = () => {
   token = ''; activeTheme = { ...curatedThemes.clean }; draftTheme = { ...activeTheme }; applyTheme(document.documentElement, activeTheme); renderTheme(); $('assistant-label').textContent = 'Your assistant'; conversationId = null; conversations = []; messages = []; uncertain = false;
+  notes = []; omittedNotes.clear(); clearNoteEditor(); renderNotes(); $('memory-context-status').textContent = ''; $('theme-prompt').value = ''; $('tone-example').textContent = 'Choose a style to see a sample response.'; $('tone-status').textContent = ''; $('preset').value = '';
   $('token').value = ''; $('content').value = ''; $('profile-fields').replaceChildren();
   $('chat-title').textContent = 'Start a conversation'; renderConversations(); renderMessages(); controls(); notice('Disconnected. Token cleared.');
 };
 $('new').onclick = () => action(async () => {
   const item = await api('/conversations', { method: 'POST' });
-  conversationId = item.id; messages = []; uncertain = false;
+  conversationId = item.id; omittedNotes.clear(); $('memory-context-status').textContent = ''; messages = []; uncertain = false;
   $('chat-title').textContent = `Conversation · ${item.id.slice(0, 8)}`; renderMessages();
   await list(true); notice('New conversation ready.');
 });
@@ -134,7 +143,7 @@ $('composer').onsubmit = async event => {
   let failure;
   try {
     const saved = await streamTurn({ conversationId, token, content, signal: controller.signal, onEvent(event) {
-      if (event.event === 'turn.started') { assistantId = event.message_id; $('content').value = ''; upsert(event.payload.user_message); upsert(event.payload.assistant_message); }
+      if (event.event === 'turn.started') { omittedNotes = new Set(event.payload.omitted_memory_ids || []); $('memory-context-status').textContent = omittedNotes.size ? `${omittedNotes.size} saved note(s) did not fit this request. See Memory for details.` : ''; renderNotes(); assistantId = event.message_id; $('content').value = ''; upsert(event.payload.user_message); upsert(event.payload.assistant_message); }
       if (event.event === 'message.delta') { const message = messages.find(m => m.id === event.message_id); if (message) { message.content += event.payload.text; renderMessages(); } }
     } });
     upsert(saved);
@@ -212,3 +221,30 @@ function profilePatch() {
   }
   return patch;
 }
+
+async function loadNotes() { notes = await api('/memories'); renderNotes(); }
+function renderNotes() {
+  $('memory-list').replaceChildren();
+  $('memory-count').textContent = `${notes.length} of 20 notes`;
+  for (const note of notes) {
+    const item = document.createElement('article'); item.className = 'note';
+    const content = document.createElement('p'); content.textContent = note.content;
+    const metadata = document.createElement('small'); metadata.textContent = `Updated ${new Date(note.updated_at).toLocaleDateString()}${note.source_message_id ? ' · From your message' : ' · Added by you'}${omittedNotes.has(note.id) ? ' · Not included in the last request (context limit)' : ''}`;
+    const actions = document.createElement('div'); actions.className = 'actions';
+    const edit = document.createElement('button'); edit.textContent = 'Edit'; edit.dataset.memoryAction = 'edit';
+    edit.onclick = () => { editingNoteId = note.id; sourceMessageId = note.source_message_id; $('memory-content').value = note.content; $('memory-save').textContent = 'Update note'; $('memory-status').textContent = 'Changes apply to the next request.'; $('memory-content').focus(); };
+    const remove = document.createElement('button'); remove.textContent = 'Delete'; remove.dataset.memoryAction = 'delete';
+    remove.onclick = () => action(async () => { await api(`/memories/${note.id}`, { method: 'DELETE' }); if (editingNoteId === note.id) clearNoteEditor(); await loadNotes(); $('memory-status').textContent = 'Note deleted. Its original chat message, if any, remains in history.'; });
+    actions.append(edit, remove); item.append(content, metadata, actions); $('memory-list').append(item);
+  }
+  for (const button of $('memory-list').querySelectorAll('button')) button.disabled = !token || busy || streaming;
+}
+function clearNoteEditor() { editingNoteId = null; sourceMessageId = null; $('memory-content').value = ''; $('memory-save').textContent = 'Save note'; $('memory-status').textContent = ''; }
+$('memory-cancel').onclick = clearNoteEditor;
+$('memory-form').onsubmit = event => { event.preventDefault(); action(async () => {
+  const payload = { content: $('memory-content').value };
+  if (!editingNoteId) payload.source_message_id = sourceMessageId;
+  await api(editingNoteId ? `/memories/${editingNoteId}` : '/memories', { method: editingNoteId ? 'PATCH' : 'POST', body: JSON.stringify(payload) });
+  clearNoteEditor(); await loadNotes(); $('memory-status').textContent = 'Note saved. It is available in new conversations and your next request.';
+}); };
+renderNotes();

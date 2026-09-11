@@ -24,6 +24,8 @@ class ContextDiagnostics:
     included_turns: int
     dropped_scanned_turns: int
     stopped_at_budget: bool
+    included_memory_ids: tuple[str, ...] = ()
+    omitted_memory_ids: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)

@@ -127,3 +127,18 @@ class Message(Record, Base):
     role: Mapped[str] = mapped_column(String(20))
     content: Mapped[str] = mapped_column(Text, server_default=text("''"))
     status: Mapped[str] = mapped_column(String(20))
+
+
+class MemoryNote(Record, Base):
+    __tablename__ = "memory_notes"
+    __table_args__ = (
+        CheckConstraint(
+            "length(trim(content)) > 0 AND length(content) <= 300", name="content_length"
+        ),
+        Index("ix_memory_notes_user_id_updated_at", "user_id", "updated_at"),
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    content: Mapped[str] = mapped_column(String(300))
+    source_message_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("messages.id", ondelete="SET NULL")
+    )

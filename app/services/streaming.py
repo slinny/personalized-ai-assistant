@@ -203,6 +203,9 @@ class TurnStream(Response):
                         Started(
                             user_message=self.turn.user_message,
                             assistant_message=self.turn.assistant_message,
+                            omitted_memory_ids=list(self.turn.request.context.omitted_memory_ids)
+                            if self.turn.request.context
+                            else [],
                         ),
                     )
                 )

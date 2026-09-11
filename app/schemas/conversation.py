@@ -2,7 +2,7 @@ from datetime import datetime
 from typing import Annotated, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, StringConstraints, field_validator
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator
 
 
 class MessageCreate(BaseModel):
@@ -40,3 +40,4 @@ class MessageResponse(BaseModel):
 class TurnResponse(BaseModel):
     user_message: MessageResponse
     assistant_message: MessageResponse
+    omitted_memory_ids: list[str] = Field(default_factory=list)

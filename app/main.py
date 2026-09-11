@@ -9,6 +9,7 @@ from openai import AsyncOpenAI, OpenAI
 from app.api.assistant import router as assistant_router
 from app.api.conversations import router as conversations_router
 from app.api.health import router
+from app.api.memory import router as memory_router
 from app.api.personalization import router as personalization_router
 from app.core.config import Settings
 from app.db.session import build_engine, build_session_factory
@@ -69,6 +70,7 @@ def create_app() -> FastAPI:
     application.include_router(assistant_router)
     application.include_router(conversations_router)
     application.include_router(personalization_router)
+    application.include_router(memory_router)
     return application
 
 
