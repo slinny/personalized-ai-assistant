@@ -6,6 +6,61 @@ single-user bearer authentication, assistant settings, deterministic behavior co
 non-streaming OpenAI conversation/message APIs, behavioral evaluations,
 model-specific context budgets, SSE streaming and cancellation, and local Docker development.
 
+## Deployment
+
+Deployment setup recorded on September 11, 2026: Render hosts the application;
+Neon hosts PostgreSQL in **Ohio (US East)**. The application serves both the API
+and browser interface, so no separate frontend deployment is required.
+
+| Resource | Dashboard |
+| --- | --- |
+| Render web service | [Service dashboard](https://dashboard.render.com/web/srv-dai2i3tg1s2s73c5npi0) |
+| Initial Render deployment | [Deployment logs](https://dashboard.render.com/web/srv-dai2i3tg1s2s73c5npi0/deploys/dep-dai2i4dg1s2s73c5nrc0) |
+| Neon project (`long-mouse-89654852`) | [Database dashboard](https://console.neon.tech/app/projects/long-mouse-89654852?database=neondb) |
+
+These are management links, not the public application URL. Deployment success
+and database connectivity have not yet been verified. Record the public Render
+URL here after verification; open `/ui/` on that URL to use the assistant.
+
+**Pending:** an OpenAI API key has not yet been created or added. Live chat,
+theme generation, and communication previews require provider configuration.
+The health endpoint and static interface can load without an API key; saved
+settings and conversation management additionally require database setup,
+authentication, migrations, and provisioning.
+
+### Render configuration
+
+Use the Python runtime (Python 3.12 or newer), with build command `pip install .`
+and health check path `/health`. For the initial single-instance deployment, use:
+
+```sh
+alembic upgrade head && python -m app.db.provision && uvicorn app.main:app --host 0.0.0.0 --port $PORT
+```
+
+This applies migrations and provisions the configured user before starting the
+API. Provisioning is repeatable and preserves existing assistant settings.
+
+Configure these values in **Render → Environment**, never in this README:
+
+| Variable | Value |
+| --- | --- |
+| `DATABASE_URL` | Neon connection URL, with `postgresql://` changed to `postgresql+psycopg://`; preserve SSL and other query parameters. |
+| `AUTH_TOKEN` | A generated secret bearer token; see Assistant setup below. |
+| `AUTH_USER_ID` | A stable generated user UUID; retain it across deployments. |
+| `OPENAI_API_KEY` | Pending: create a key and add it when enabling live generation. |
+| `OPENAI_MODEL` | An exact model ID available to the OpenAI project. |
+| `OPENAI_MAX_OUTPUT_TOKENS` | Output token limit supported by the selected model, for example `2048`. |
+| `CONTEXT_MODEL_BUDGETS` | JSON containing an entry for the exact model ID; see Context budgets below. |
+
+Neon's displayed connection string is read-only: edit the copied URL in Render.
+Paste only the URL, without a surrounding `psql` command or shell quotes. Keep
+database credentials, bearer tokens, API keys, and `.env` out of Git.
+
+After saving environment changes and redeploying, check `/health`, then connect
+at `/ui/` with the bearer token and verify saved settings. Once provider settings
+are complete, send a message to verify live generation; this makes a paid API
+call. Free hosting does not include OpenAI API usage.
+
 ## Local Python
 
 ```sh
