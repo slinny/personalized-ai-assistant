@@ -441,3 +441,11 @@ Manual smoke checklist (use a disposable development database):
 Run `pytest -q` (set `TEST_DATABASE_URL` for database tests) and
 `node --test examples/stream-client.test.mjs`. The example re-exports the same stream
 implementation shipped with the browser client.
+
+## Personal interface
+
+Open `/ui/` on the running API for the everyday chat interface. Connect with the
+same bearer token used by the API; it stays in tab memory. The original
+`/test-client/` remains available for diagnostics. Personalize opens appearance
+and communication controls. “Shorter” and “More detail” prepare a follow-up for
+review before sending and do not change saved preferences.

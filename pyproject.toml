@@ -34,4 +34,4 @@ strict = true
 files = ["app", "tests"]
 
 [tool.setuptools.package-data]
-app = ["test_client/*.html", "test_client/*.css", "test_client/*.mjs"]
+app = ["test_client/*.html", "test_client/*.css", "test_client/*.mjs", "ui/*.html", "ui/*.css", "ui/*.mjs"]

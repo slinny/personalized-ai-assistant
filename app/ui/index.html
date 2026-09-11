@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Your assistant · A space of your own</title>
+  <link rel="stylesheet" href="/ui/style.css"><script type="module" src="/ui/client.mjs"></script>
+</head>
+<body>
+<a class="skip" href="#content">Skip to message</a>
+<header><a class="brand" href="/ui/" aria-label="Assistant home"><span class="mark" aria-hidden="true">a.</span><span id="assistant-label">Your assistant</span></a><button id="settings-open">Personalize <span aria-hidden="true">◐</span></button></header>
+<div class="workspace">
+  <aside class="sidebar"><div class="section-head"><h2>Your conversations</h2><button id="new" disabled aria-label="New conversation">+</button></div>
+    <p class="muted">A little room to think.</p><nav id="conversations" aria-label="Conversations"></nav><button id="more" class="quiet" disabled>Load more</button>
+    <details class="connection-panel" open><summary>Connection</summary><form id="connection"><label>Access token<input id="token" type="password" required autocomplete="off" placeholder="Your private access token"></label><div class="actions"><button type="submit">Connect</button><button id="disconnect" type="button" disabled>Disconnect</button></div><p class="muted">Your token stays in this tab and clears on reload.</p></form></details>
+  </aside>
+  <main class="chat"><div class="section-head"><div><p class="eyebrow">A SPACE OF YOUR OWN</p><h1 id="chat-title">What’s on your mind?</h1></div><button id="refresh" class="quiet" disabled>Refresh</button></div>
+    <p id="notice" role="status" aria-live="polite">Connect to pick up a conversation, or start something new.</p>
+    <div id="messages" role="log" aria-label="Messages"><div class="welcome"><span class="welcome-mark" aria-hidden="true">a.</span><h2>Make yourself at home.</h2><p>Think something through, find the words,<br>or take the next small step.</p><button onclick="document.getElementById('settings-open').click()">Make this space yours</button></div></div>
+    <form id="composer"><label class="sr-only" for="content">Your message</label><textarea id="content" rows="3" maxlength="20000" placeholder="Start wherever you are…" required disabled></textarea><div class="actions"><span id="turn-status">Ready when you are</span><button id="stop" type="button" disabled>Stop</button><button id="send" class="primary" disabled>Send</button></div></form>
+    <div class="followups"><button id="shorter" class="quiet" disabled>Shorter</button><button id="detail" class="quiet" disabled>More detail</button><span class="muted">Just for this conversation</span></div>
+  </main>
+</div>
+<dialog id="settings-dialog" aria-labelledby="settings-title"><div class="section-head"><div><p class="eyebrow">MAKE IT FEEL LIKE YOU</p><h2 id="settings-title">Personalize your assistant</h2></div><button id="settings-close" aria-label="Close settings">✕</button></div>
+  <section class="settings-section"><h3>Appearance</h3><p class="muted">A different look. The same conversations.</p><div class="pair"><label>Theme<select id="theme"><option value="clean">Clean</option><option value="warm">Warm</option><option value="dark">Dark</option></select></label><label>Spacing<select id="density"><option value="comfortable">Comfortable</option><option value="compact">Compact</option></select></label></div></section>
+  <section class="settings-section"><h3>Communication</h3><label>Start with a style<select id="preset" disabled><option value="">Choose a preset</option><option value="concise">Concise and direct</option><option value="warm">Warm and supportive</option><option value="detailed">Detailed and explanatory</option></select></label><blockquote id="tone-example">Choose a style to see a sample response.</blockquote><p class="muted">Illustrative example. Actual responses depend on your message.</p><form id="profile"><details><summary>Fine-tune your preferences</summary><fieldset id="profile-fields" disabled></fieldset></details><button id="save" class="primary" disabled>Save communication settings</button></form></section>
+</dialog>
+</body></html>

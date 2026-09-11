@@ -362,3 +362,15 @@ docker run --rm --network container:assistant-task8-test \
 - No real model calls were made. The complete Compose stack and mobile browser
   layout were not exercised in this change. Two existing dependency deprecation
   warnings remain.
+
+## Personalization step 1 — personal chat interface
+
+- Added `/ui/` with responsive chat, a native settings dialog, three curated
+  appearances, communication presets/examples, and response refinement shortcuts.
+  Reused the existing streaming/cancellation client; `/test-client/` is preserved.
+- Appearance is temporarily device-local and profile-keyed; step 2 moves it to
+  validated server persistence. Communication uses the existing profile endpoint.
+- Fixed an existing disabled-auth test's accidental dependency on the local `.env`.
+- Validation: 259 Python tests passed against disposable PostgreSQL 17; 5 Node
+  tests passed; Ruff lint/format, mypy, and JavaScript syntax checks passed.
+  `/ui/` returned HTTP 200 from the local preview. No live model call was made.

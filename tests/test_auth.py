@@ -1,3 +1,4 @@
+from pathlib import Path
 from typing import Annotated
 from uuid import UUID, uuid4
 
@@ -32,7 +33,8 @@ def test_authentication(monkeypatch: pytest.MonkeyPatch) -> None:
         assert client.get("/health").status_code == 200
 
 
-def test_disabled_auth(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_disabled_auth(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.chdir(tmp_path)
     monkeypatch.delenv("AUTH_TOKEN", raising=False)
     monkeypatch.delenv("AUTH_USER_ID", raising=False)
     app = create_app()

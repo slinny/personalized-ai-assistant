@@ -55,6 +55,11 @@ def create_app() -> FastAPI:
     application = FastAPI(title=settings.app_name, lifespan=lifespan)
     application.state.settings = settings
     application.mount(
+        "/ui",
+        StaticFiles(directory=Path(__file__).parent / "ui", html=True),
+        name="ui",
+    )
+    application.mount(
         "/test-client",
         StaticFiles(directory=Path(__file__).parent / "test_client", html=True),
         name="test-client",

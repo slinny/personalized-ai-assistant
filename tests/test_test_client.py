@@ -18,3 +18,14 @@ def test_browser_client_assets_and_api_auth() -> None:
             assert mime in response.headers["content-type"]
         assert client.get("/test-client/missing.js").status_code == 404
         assert client.get("/assistant").status_code in (401, 503)
+
+
+def test_personal_interface_assets() -> None:
+    with TestClient(create_app()) as client:
+        page = client.get("/ui/")
+        assert page.status_code == 200
+        assert 'id="settings-dialog"' in page.text
+        assert 'id="stop"' in page.text
+        for asset in ["client.mjs", "personalization.mjs", "style.css"]:
+            assert client.get(f"/ui/{asset}").status_code == 200
+        assert client.get("/ui/missing.js").status_code == 404
