@@ -92,6 +92,7 @@ class AssistantProfile(Record, Base):
         JSONB, server_default=text("'{}'::jsonb")
     )
     preferred_model: Mapped[str | None] = mapped_column(String(200))
+    appearance: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
 
 
 class Conversation(Record, Base):

@@ -374,3 +374,14 @@ docker run --rm --network container:assistant-task8-test \
 - Validation: 259 Python tests passed against disposable PostgreSQL 17; 5 Node
   tests passed; Ruff lint/format, mypy, and JavaScript syntax checks passed.
   `/ui/` returned HTTP 200 from the local preview. No live model call was made.
+
+## Personalization step 2 — persisted AI theme previews
+
+- Added migration `9a01`, a bounded theme schema with contrast validation,
+  authenticated generation/save/read routes, and an unsaved communication preview.
+- Appearance now persists in PostgreSQL; the UI isolates draft previews until
+  Apply. Invalid/unreadable provider output preserves the last saved appearance.
+- Validation: 271 Python tests passed including PostgreSQL migration round-trip,
+  persistence/isolation, failed previews, theme contrast, and schema drift checks.
+  Ruff, mypy, JS syntax and all 5 Node tests passed. Provider calls used fakes;
+  actual model theme quality is not established by these automated checks.

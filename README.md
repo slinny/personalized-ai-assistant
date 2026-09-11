@@ -449,3 +449,16 @@ same bearer token used by the API; it stays in tab memory. The original
 `/test-client/` remains available for diagnostics. Personalize opens appearance
 and communication controls. “Shorter” and “More detail” prepare a follow-up for
 review before sending and do not change saved preferences.
+
+Appearance is saved per assistant in PostgreSQL. Run `alembic upgrade head` before
+using this version. In Personalize, choose a curated look or describe one, review
+the preview, then Apply. Reset restores the clean default. Generating/refining a
+theme and trying a live communication sample each make one bounded model request;
+saving or switching an appearance does not. Failed previews leave saved settings
+unchanged. Generation requires the existing model, API key, and context budget.
+
+The authenticated appearance API is `GET/PUT /assistant/theme`, with
+`POST /assistant/theme/generate` for an unsaved preview. Themes contain only
+validated style tokens, with 4.5:1 text/accent contrast on both surfaces.
+`POST /assistant/preview` accepts `{ "changes": { "verbosity": 0.2 } }` and
+returns a live style sample without saving preferences or conversation messages.

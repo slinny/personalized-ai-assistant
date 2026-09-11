@@ -1,7 +1,7 @@
 import { streamTurn, cancelTurn } from '/test-client/stream-client.mjs';
 import { presets, examples, applyTheme, curatedThemes } from './personalization.mjs';
 const $ = id => document.getElementById(id);
-let profileId = null;
+let activeTheme = { ...curatedThemes.clean }, draftTheme = { ...activeTheme };
 let token = '', conversationId = null, conversations = [], messages = [];
 let busy = false, streaming = false, assistantId = null, controller = null, uncertain = false;
 const fields = {
@@ -13,10 +13,10 @@ const fields = {
   good_night_greeting_enabled: 'Good night greeting', holiday_preferences: 'Holiday preferences (JSON)',
 };
 const sliders = ['warmth', 'verbosity', 'humor', 'formality'];
-function notice(text, error = false) { $('notice').textContent = text; $('notice').className = error ? 'error' : ''; }
+function notice(text, error = false) { $('settings-notice').textContent = $('settings-dialog').open ? text : ''; $('notice').textContent = text; $('notice').className = error ? 'error' : ''; }
 function controls() {
   const locked = busy || streaming;
-  for (const id of ['new', 'more', 'save', 'profile-fields', 'disconnect', 'preset', 'shorter', 'detail']) $(id).disabled = !token || locked;
+  for (const id of ['new', 'more', 'save', 'profile-fields', 'disconnect', 'preset', 'shorter', 'detail', 'theme-apply', 'theme-reset', 'theme-generate', 'tone-live']) $(id).disabled = !token || locked;
   $('more').disabled ||= conversations.length % 50 !== 0;
   $('refresh').disabled = !conversationId || locked;
   $('send').disabled = $('content').disabled = !conversationId || locked || uncertain;
@@ -84,10 +84,7 @@ async function history() {
   notice(messages.some(m => m.status === 'in_progress') ? 'A turn is still in progress. Refresh history to check its saved outcome.' : 'Saved history is up to date.');
 }
 function renderProfile(profile) {
-  profileId = profile.id;
   $('assistant-label').textContent = profile.name;
-  try { const saved = JSON.parse(localStorage.getItem(`appearance:${profileId}`)); if (saved) { $('theme').value = saved.theme; $('density').value = saved.density; } } catch {}
-  updateAppearance(false);
   $('profile-fields').replaceChildren();
   for (const [key, title] of Object.entries(fields)) {
     const label = document.createElement('label'); label.textContent = title;
@@ -110,11 +107,11 @@ function renderProfile(profile) {
 }
 $('connection').onsubmit = event => { event.preventDefault(); action(async () => {
   token = $('token').value.trim();
-  try { renderProfile(await api('/assistant')); await list(true); $('token').value = ''; notice('Connected. Select a conversation or create one.'); }
+  try { renderProfile(await api('/assistant')); activeTheme = await api('/assistant/theme'); draftTheme = { ...activeTheme }; applyTheme(document.documentElement, activeTheme); renderTheme(); await list(true); $('token').value = ''; notice('Connected. Select a conversation or create one.'); }
   catch (error) { token = ''; throw error; }
 }); };
 $('disconnect').onclick = () => {
-  token = ''; profileId = null; $('assistant-label').textContent = 'Your assistant'; conversationId = null; conversations = []; messages = []; uncertain = false;
+  token = ''; activeTheme = { ...curatedThemes.clean }; draftTheme = { ...activeTheme }; applyTheme(document.documentElement, activeTheme); renderTheme(); $('assistant-label').textContent = 'Your assistant'; conversationId = null; conversations = []; messages = []; uncertain = false;
   $('token').value = ''; $('content').value = ''; $('profile-fields').replaceChildren();
   $('chat-title').textContent = 'Start a conversation'; renderConversations(); renderMessages(); controls(); notice('Disconnected. Token cleared.');
 };
@@ -127,11 +124,8 @@ $('new').onclick = () => action(async () => {
 $('more').onclick = () => action(() => list());
 $('refresh').onclick = () => action(() => history());
 $('profile').onsubmit = event => { event.preventDefault(); action(async () => {
-  const patch = {};
-  for (const input of $('profile-fields').querySelectorAll('input,textarea,select')) {
-    patch[input.name] = input.type === 'checkbox' ? input.checked : sliders.includes(input.name) ? Number(input.value) : input.name === 'holiday_preferences' ? JSON.parse(input.value) : ['preferred_model', 'preferred_user_name'].includes(input.name) ? input.value.trim() || null : input.value;
-  }
-  renderProfile(await api('/assistant', { method: 'PATCH', body: JSON.stringify(patch) })); notice('Settings saved. They apply to the next turn.');
+  const patch = profilePatch();
+  renderProfile(await api('/assistant', { method: 'PATCH', body: JSON.stringify(patch) })); notice('Settings saved. They apply to the next turn.'); $('tone-status').textContent = 'Communication settings saved.';
 }); };
 $('composer').onsubmit = async event => {
   event.preventDefault(); if ($('send').disabled || !$('content').value.trim()) return;
@@ -168,26 +162,53 @@ $('stop').onclick = async () => {
 };
 controls();
 
-function updateAppearance(save = true) {
-  applyTheme(document.documentElement, curatedThemes[$('theme').value] || curatedThemes.clean);
-  document.documentElement.dataset.density = $('density').value;
-  if (save && profileId) {
-    try { localStorage.setItem(`appearance:${profileId}`, JSON.stringify({ theme: $('theme').value, density: $('density').value })); }
-    catch { notice('Appearance changed for this visit. Browser storage is unavailable.', true); }
-  }
+function renderTheme() {
+  $('theme').value = Object.entries(curatedThemes).find(([, theme]) => Object.entries(theme).every(([key, value]) => key === 'spacing' || draftTheme[key] === value))?.[0] || 'custom';
+  $('density').value = draftTheme.spacing;
+  applyTheme($('theme-preview'), draftTheme);
 }
-$('theme').onchange = () => updateAppearance();
-$('density').onchange = () => updateAppearance();
+$('theme').onchange = () => { if (curatedThemes[$('theme').value]) draftTheme = { ...curatedThemes[$('theme').value], spacing: $('density').value }; renderTheme(); };
+$('density').onchange = () => { draftTheme = { ...draftTheme, spacing: $('density').value }; renderTheme(); };
+$('theme-form').onsubmit = event => { event.preventDefault(); action(async () => {
+  $('theme-status').textContent = 'Creating your preview…';
+  try {
+    draftTheme = await api('/assistant/theme/generate', { method: 'POST', body: JSON.stringify({ prompt: $('theme-prompt').value, current: draftTheme }) });
+    renderTheme(); $('theme-status').textContent = 'Preview ready. Refine it or apply when it feels right.';
+  } catch (error) { $('theme-status').textContent = error.message; }
+}); };
+$('theme-apply').onclick = () => action(async () => {
+  activeTheme = await api('/assistant/theme', { method: 'PUT', body: JSON.stringify(draftTheme) });
+  applyTheme(document.documentElement, activeTheme); $('theme-status').textContent = 'Appearance saved.';
+});
+$('theme-reset').onclick = () => action(async () => {
+  activeTheme = await api('/assistant/theme', { method: 'PUT', body: JSON.stringify(curatedThemes.clean) });
+  draftTheme = { ...activeTheme }; applyTheme(document.documentElement, activeTheme); renderTheme(); $('theme-status').textContent = 'Default appearance restored.';
+});
+$('tone-live').onclick = () => action(async () => {
+  $('tone-status').textContent = 'Generating a sample with your current preferences…';
+  try {
+    const result = await api('/assistant/preview', { method: 'POST', body: JSON.stringify({ changes: profilePatch() }) });
+    $('tone-example').textContent = result.text; $('tone-status').textContent = 'Live model sample. Your preferences have not been saved.';
+  } catch (error) { $('tone-status').textContent = error.message; }
+});
 $('preset').onchange = () => {
   const value = $('preset').value;
   if (!presets[value]) return;
   for (const [key, number] of Object.entries(presets[value])) $('profile-fields').querySelector(`[name="${key}"]`).value = number;
   $('tone-example').textContent = examples[value];
-  notice('Preset selected. Save communication settings to use it.');
+  $('tone-status').textContent = 'Illustrative example. Save communication settings to use this style.';
 };
 for (const [id, prompt] of [['shorter', 'Please make your last answer shorter.'], ['detail', 'Please explain your last answer in more detail.']]) {
   $(id).onclick = () => { $('content').value = prompt; $('content').focus(); };
 }
 $('settings-open').onclick = () => $('settings-dialog').showModal();
 $('settings-close').onclick = () => $('settings-dialog').close();
-updateAppearance(false);
+renderTheme();
+
+function profilePatch() {
+  const patch = {};
+  for (const input of $('profile-fields').querySelectorAll('input,textarea,select')) {
+    patch[input.name] = input.type === 'checkbox' ? input.checked : sliders.includes(input.name) ? Number(input.value) : input.name === 'holiday_preferences' ? JSON.parse(input.value) : ['preferred_model', 'preferred_user_name'].includes(input.name) ? input.value.trim() || null : input.value;
+  }
+  return patch;
+}
